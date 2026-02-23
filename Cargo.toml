@@ -1,0 +1,40 @@
+[workspace]
+resolver = "3"
+members = [".", "crates/*", "examples/*"]
+
+[package]
+name = "conflaguration"
+version = "1.0.0"
+edition = "2024"
+description = "typed settings structs from environment variables"
+license = "MIT"
+repository = "https://github.com/brianbruggeman/conflaguration"
+keywords = ["env", "settings", "config", "derive", "configuration"]
+categories = ["config"]
+
+[dependencies]
+environs = "1.0.0"
+thiserror = "2"
+conflaguration-derive = { version = "1.0.0", path = "crates/conflaguration-derive", optional = true }
+serde = { version = "1", optional = true }
+toml = { version = "0.8", optional = true }
+serde_json = { version = "1", optional = true }
+serde_yaml = { version = "0.9", optional = true }
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+temp-env = "0.3.6"
+tempfile = "3.25.0"
+
+[features]
+derive = ["dep:conflaguration-derive"]
+toml = ["dep:serde", "dep:toml"]
+json = ["dep:serde", "dep:serde_json"]
+yaml = ["dep:serde", "dep:serde_yaml"]

@@ -1,0 +1,24 @@
+[package]
+name = "conflaguration-derive"
+version = "1.0.0"
+edition = "2024"
+description = "derive macro for conflaguration settings structs"
+license = "MIT"
+repository = "https://github.com/brianbruggeman/conflaguration"
+keywords = ["env", "settings", "derive", "config", "macro"]
+categories = ["config"]
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
+
+[lints.rust]
+warnings = "deny"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
