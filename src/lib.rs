@@ -72,6 +72,7 @@ impl std::fmt::Display for ValidationMessage {
     }
 }
 
+#[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error(transparent)]
@@ -137,19 +138,41 @@ pub fn builder<T>() -> ConfigBuilder<T> {
 pub trait ConfigDisplay {
     fn fmt_config(&self, formatter: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result;
 
+    fn fmt_config_with_prefix(&self, formatter: &mut std::fmt::Formatter<'_>, depth: usize, _prefix: &str) -> std::fmt::Result {
+        self.fmt_config(formatter, depth)
+    }
+
     fn display(&self) -> ConfigView<'_, Self>
     where
         Self: Sized,
     {
         ConfigView(self)
     }
+
+    fn display_with_prefix<'a>(&'a self, prefix: &'a str) -> ConfigPrefixView<'a, Self>
+    where
+        Self: Sized,
+    {
+        ConfigPrefixView { inner: self, prefix }
+    }
 }
 
-pub struct ConfigView<'a, T: ConfigDisplay + ?Sized>(pub &'a T);
+pub struct ConfigView<'a, T: ConfigDisplay + ?Sized>(&'a T);
 
 impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigView<'_, T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt_config(formatter, 0)
+    }
+}
+
+pub struct ConfigPrefixView<'a, T: ConfigDisplay + ?Sized> {
+    inner: &'a T,
+    prefix: &'a str,
+}
+
+impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigPrefixView<'_, T> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.inner.fmt_config_with_prefix(formatter, 0, self.prefix)
     }
 }
 

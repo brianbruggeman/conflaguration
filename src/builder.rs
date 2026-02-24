@@ -24,7 +24,8 @@ impl<T> ConfigBuilder<T> {
     {
         match self.state {
             Some(Err(_)) => self,
-            _ => Self { state: Some(Ok(T::default())) },
+            None => Self { state: Some(Ok(T::default())) },
+            _ => self,
         }
     }
 
