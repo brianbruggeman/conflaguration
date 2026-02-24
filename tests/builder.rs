@@ -222,3 +222,46 @@ fn file_error_short_circuits() {
     let result: Result<TestConfig> = conflaguration::builder().file(bad_path).env().build();
     assert!(matches!(result, Err(Error::Io(_))));
 }
+
+#[test]
+fn env_then_defaults_preserves_env_config() {
+    temp_env::with_vars([("BTEST_HOST", Some("from_env")), ("BTEST_PORT", Some("5555"))], || {
+        let config: TestConfig = conflaguration::builder()
+            .env()
+            .defaults()
+            .build()
+            .unwrap_or_else(|err| panic!("build failed: {err}"));
+        assert_eq!(config.host, "from_env");
+        assert_eq!(config.port, 5555);
+    });
+}
+
+#[test]
+fn defaults_then_env_loads_normally() {
+    temp_env::with_vars([("BTEST_HOST", Some("env_host")), ("BTEST_PORT", Some("7777"))], || {
+        let config: TestConfig = conflaguration::builder()
+            .defaults()
+            .env()
+            .build()
+            .unwrap_or_else(|err| panic!("build failed: {err}"));
+        assert_eq!(config.host, "env_host");
+        assert_eq!(config.port, 7777);
+    });
+}
+
+#[test]
+fn validate_on_none_state_is_noop() {
+    temp_env::with_vars([("BTEST_HOST", Some("valid")), ("BTEST_PORT", Some("8080"))], || {
+        let with_validate: TestConfig = conflaguration::builder()
+            .validate()
+            .env()
+            .build()
+            .unwrap_or_else(|err| panic!("build failed: {err}"));
+        let without_validate: TestConfig = conflaguration::builder()
+            .env()
+            .build()
+            .unwrap_or_else(|err| panic!("build failed: {err}"));
+        assert_eq!(with_validate.host, without_validate.host);
+        assert_eq!(with_validate.port, without_validate.port);
+    });
+}

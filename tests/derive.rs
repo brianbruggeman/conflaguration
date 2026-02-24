@@ -958,3 +958,83 @@ fn override_from_env_with_prefix_uses_dynamic_prefix() {
         assert!(config.debug);
     });
 }
+
+#[test]
+fn config_display_with_dynamic_prefix_shows_runtime_keys() {
+    temp_env::with_vars([("CUSTOM_PORT", Some("3000")), ("CUSTOM_HOST", Some("rt.host")), ("CUSTOM_DEBUG", Some("true"))], || {
+        let config = DisplayBasicConfig::from_env_with_prefix("CUSTOM").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
+        let output = format!("{}", config.display_with_prefix("CUSTOM"));
+        assert!(output.contains("port = 3000 (CUSTOM_PORT)"), "got: {output}");
+        assert!(output.contains("host = \"rt.host\" (CUSTOM_HOST)"), "got: {output}");
+        assert!(output.contains("debug = true (CUSTOM_DEBUG)"), "got: {output}");
+    });
+}
+
+#[test]
+fn config_display_with_dynamic_prefix_on_nested_without_override_prefix() {
+    temp_env::with_vars([("RT_PORT", Some("5555")), ("DISP_INNER_URL", Some("redis://rt"))], || {
+        let config = DisplayOuter::from_env_with_prefix("RT").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
+        let output = format!("{}", config.display_with_prefix("RT"));
+        assert!(output.contains("port = 5555 (RT_PORT)"), "got: {output}");
+        assert!(output.contains("inner:"), "got: {output}");
+        assert!(output.contains("DISP_INNER_URL"), "nested without override_prefix uses static keys, got: {output}");
+    });
+}
+
+#[derive(Debug, Settings, ConfigDisplay)]
+#[settings(prefix = "DPFX_INNER")]
+struct DynPrefixInner {
+    #[setting(default = "default_url")]
+    url: String,
+}
+
+#[derive(Debug, Settings, ConfigDisplay)]
+#[settings(prefix = "DPFX_OUTER")]
+struct DynPrefixOuter {
+    #[setting(default = 8080)]
+    port: u16,
+
+    #[setting(nested, override_prefix)]
+    inner: DynPrefixInner,
+}
+
+#[test]
+fn config_display_with_dynamic_prefix_on_override_prefix_nested() {
+    temp_env::with_vars([("RT_PORT", Some("5555")), ("RT_DPFX_INNER_URL", Some("redis://rt"))], || {
+        let config = DynPrefixOuter::from_env_with_prefix("RT").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
+        let output = format!("{}", config.display_with_prefix("RT"));
+        assert!(output.contains("port = 5555 (RT_PORT)"), "got: {output}");
+        assert!(output.contains("inner:"), "got: {output}");
+        assert!(output.contains("RT_DPFX_INNER_URL"), "nested with override_prefix should accumulate runtime prefix, got: {output}");
+    });
+}
+
+#[test]
+fn from_env_with_prefix_nested_explicit_override_ignores_dynamic() {
+    temp_env::with_vars(
+        [("RUNTIME_INNER_VALUE", Some("should_not_use")), ("CUSTOM_NS_VALUE", Some("explicit_wins"))],
+        || {
+            let config =
+                ExplicitPrefixOuter::from_env_with_prefix("RUNTIME").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
+            assert_eq!(config.inner.value, "explicit_wins");
+        },
+    );
+}
+
+#[derive(Settings, Validate)]
+#[settings(prefix = "NONNEST_VAL")]
+struct NonNestedValidateOuter {
+    #[setting(default = 1)]
+    count: i32,
+
+    #[setting(default = 0)]
+    port: u16,
+}
+
+#[test]
+fn non_nested_validate_does_not_cascade_to_plain_fields() {
+    temp_env::with_vars([("NONNEST_VAL_COUNT", None::<&str>), ("NONNEST_VAL_PORT", Some("0"))], || {
+        let config = NonNestedValidateOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert!(config.validate().is_ok());
+    });
+}
