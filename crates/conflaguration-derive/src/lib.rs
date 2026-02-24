@@ -218,238 +218,162 @@ fn gen_resolve_call(keys_expr: TokenStream2, attrs: &FieldAttrs) -> TokenStream2
     }
 }
 
-fn gen_field_expr(field: &syn::Field, prefix: &Option<String>) -> syn::Result<TokenStream2> {
-    let field_name = field
-        .ident
-        .as_ref()
-        .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-    let field_name_str = field_name.to_string();
-    let attrs = parse_field_attrs(field)?;
-
-    if attrs.skip {
-        return Ok(quote! { ::core::default::Default::default() });
-    }
-
-    if attrs.nested {
-        let field_type = &field.ty;
-        return match &attrs.override_prefix {
-            Some(None) => match prefix {
-                Some(pfx) => Ok(quote! {
-                    {
-                        let __nested = match <#field_type as ::conflaguration::Settings>::PREFIX {
-                            Some(__inner) => ::std::format!("{}_{}", #pfx, __inner),
-                            None => #pfx.to_string(),
-                        };
-                        <#field_type as ::conflaguration::Settings>::from_env_with_prefix(&__nested)?
-                    }
-                }),
-                None => Ok(quote! {
-                    <#field_type as ::conflaguration::Settings>::from_env()?
-                }),
-            },
-            Some(Some(explicit)) => Ok(quote! {
-                <#field_type as ::conflaguration::Settings>::from_env_with_prefix(#explicit)?
-            }),
-            None => Ok(quote! {
-                <#field_type as ::conflaguration::Settings>::from_env()?
-            }),
-        };
-    }
-
-    let keys = build_key_list(prefix, &field_name_str, &attrs);
-    let keys_ref = &keys;
-    let keys_expr = quote! { &[#(#keys_ref),*] };
-    Ok(gen_resolve_call(keys_expr, &attrs))
+enum PrefixMode<'a> {
+    Static(&'a Option<String>),
+    Dynamic,
 }
 
-fn gen_field_expr_dynamic(field: &syn::Field) -> syn::Result<TokenStream2> {
-    let field_name = field
-        .ident
-        .as_ref()
-        .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-    let field_name_str = field_name.to_string();
-    let attrs = parse_field_attrs(field)?;
-
-    if attrs.skip {
-        return Ok(quote! { ::core::default::Default::default() });
-    }
-
-    if attrs.nested {
-        let field_type = &field.ty;
-        return match &attrs.override_prefix {
-            Some(None) => Ok(quote! {
-                {
-                    let __nested = match <#field_type as ::conflaguration::Settings>::PREFIX {
-                        Some(__inner) => ::std::format!("{}_{}", __prefix, __inner),
-                        None => __prefix.to_string(),
-                    };
-                    <#field_type as ::conflaguration::Settings>::from_env_with_prefix(&__nested)?
-                }
-            }),
-            Some(Some(explicit)) => Ok(quote! {
-                <#field_type as ::conflaguration::Settings>::from_env_with_prefix(#explicit)?
-            }),
-            None => Ok(quote! {
-                <#field_type as ::conflaguration::Settings>::from_env()?
-            }),
-        };
-    }
-
-    let names = if attrs.envs.is_empty() {
-        vec![field_name_to_env_key(&field_name_str)]
-    } else {
-        attrs.envs.clone()
-    };
-
-    let names_ref = &names;
-    let is_override = attrs.envs_override;
-    let keys_build = if is_override {
-        quote! {
-            let __keys: Vec<String> = vec![#(#names_ref.to_string()),*];
-        }
-    } else {
-        quote! {
-            let __keys: Vec<String> = vec![#(::std::format!("{}_{}", __prefix, #names_ref)),*];
-        }
-    };
-
-    let resolve = if let Some(lit) = &attrs.default {
-        if matches!(lit, Lit::Str(_)) {
-            let lit_str = match lit {
-                Lit::Str(strlit) => strlit.value(),
-                _ => unreachable!(),
+fn nested_prefix(
+    field_type: &syn::Type,
+    attrs: &FieldAttrs,
+    prefix_mode: &PrefixMode<'_>,
+) -> Option<TokenStream2> {
+    match &attrs.override_prefix {
+        Some(Some(explicit)) => Some(quote! { #explicit.to_owned() }),
+        Some(None) => {
+            let pfx = match prefix_mode {
+                PrefixMode::Static(Some(pfx)) => quote! { #pfx },
+                PrefixMode::Dynamic => quote! { __prefix },
+                PrefixMode::Static(None) => return None,
             };
-            quote! { ::conflaguration::resolve_or_parse(&__key_refs, #lit_str)? }
-        } else {
-            quote! { ::conflaguration::resolve_or(&__key_refs, #lit)? }
-        }
-    } else if let Some(default_str) = &attrs.default_str {
-        quote! { ::conflaguration::resolve_or_parse(&__key_refs, #default_str)? }
-    } else {
-        quote! { ::conflaguration::resolve(&__key_refs)? }
-    };
-
-    Ok(quote! {
-        {
-            #keys_build
-            let __key_refs: Vec<&str> = __keys.iter().map(|s| s.as_str()).collect();
-            #resolve
-        }
-    })
-}
-
-fn gen_override_field_expr(field: &syn::Field, prefix: &Option<String>) -> syn::Result<TokenStream2> {
-    let field_name = field
-        .ident
-        .as_ref()
-        .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-    let field_name_str = field_name.to_string();
-    let attrs = parse_field_attrs(field)?;
-
-    if attrs.skip {
-        return Ok(quote! {});
-    }
-
-    if attrs.nested {
-        let field_type = &field.ty;
-        return match &attrs.override_prefix {
-            Some(None) => match prefix {
-                Some(pfx) => Ok(quote! {
-                    {
-                        let __nested = match <#field_type as ::conflaguration::Settings>::PREFIX {
-                            Some(__inner) => ::std::format!("{}_{}", #pfx, __inner),
-                            None => #pfx.to_string(),
-                        };
-                        ::conflaguration::Settings::override_from_env_with_prefix(&mut self.#field_name, &__nested)?;
-                    }
-                }),
-                None => Ok(quote! {
-                    ::conflaguration::Settings::override_from_env(&mut self.#field_name)?;
-                }),
-            },
-            Some(Some(explicit)) => Ok(quote! {
-                ::conflaguration::Settings::override_from_env_with_prefix(&mut self.#field_name, #explicit)?;
-            }),
-            None => Ok(quote! {
-                ::conflaguration::Settings::override_from_env(&mut self.#field_name)?;
-            }),
-        };
-    }
-
-    let keys = build_key_list(prefix, &field_name_str, &attrs);
-    let keys_ref = &keys;
-    let keys_expr = quote! { &[#(#keys_ref),*] };
-
-    Ok(quote! {
-        {
-            let __keys: &[&str] = #keys_expr;
-            if __keys.iter().any(|__k| ::std::env::var(__k).is_ok()) {
-                self.#field_name = ::conflaguration::resolve(__keys)?;
-            }
-        }
-    })
-}
-
-fn gen_override_field_expr_dynamic(field: &syn::Field) -> syn::Result<TokenStream2> {
-    let field_name = field
-        .ident
-        .as_ref()
-        .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-    let field_name_str = field_name.to_string();
-    let attrs = parse_field_attrs(field)?;
-
-    if attrs.skip {
-        return Ok(quote! {});
-    }
-
-    if attrs.nested {
-        let field_type = &field.ty;
-        return match &attrs.override_prefix {
-            Some(None) => Ok(quote! {
-                {
-                    let __nested = match <#field_type as ::conflaguration::Settings>::PREFIX {
-                        Some(__inner) => ::std::format!("{}_{}", __prefix, __inner),
-                        None => __prefix.to_string(),
-                    };
-                    ::conflaguration::Settings::override_from_env_with_prefix(&mut self.#field_name, &__nested)?;
+            Some(quote! {
+                match <#field_type as ::conflaguration::Settings>::PREFIX {
+                    Some(__inner) => ::std::format!("{}_{}", #pfx, __inner),
+                    None => (#pfx).to_owned(),
                 }
-            }),
-            Some(Some(explicit)) => Ok(quote! {
-                ::conflaguration::Settings::override_from_env_with_prefix(&mut self.#field_name, #explicit)?;
-            }),
-            None => Ok(quote! {
-                ::conflaguration::Settings::override_from_env(&mut self.#field_name)?;
-            }),
-        };
+            })
+        }
+        None => None,
     }
+}
 
+fn gen_nested_construct(
+    field_type: &syn::Type,
+    prefix: Option<TokenStream2>,
+) -> TokenStream2 {
+    match prefix {
+        Some(pfx) => quote! {
+            { let __nested = #pfx; <#field_type as ::conflaguration::Settings>::from_env_with_prefix(&__nested)? }
+        },
+        None => quote! { <#field_type as ::conflaguration::Settings>::from_env()? },
+    }
+}
+
+fn gen_nested_override(
+    field_name: &syn::Ident,
+    prefix: Option<TokenStream2>,
+) -> TokenStream2 {
+    match prefix {
+        Some(pfx) => quote! {
+            { let __nested = #pfx; ::conflaguration::Settings::override_from_env_with_prefix(&mut self.#field_name, &__nested)?; }
+        },
+        None => quote! { ::conflaguration::Settings::override_from_env(&mut self.#field_name)?; },
+    }
+}
+
+fn dynamic_key_tokens(field_name_str: &str, attrs: &FieldAttrs) -> (TokenStream2, TokenStream2) {
     let names = if attrs.envs.is_empty() {
-        vec![field_name_to_env_key(&field_name_str)]
+        vec![field_name_to_env_key(field_name_str)]
     } else {
         attrs.envs.clone()
     };
-
     let names_ref = &names;
-    let is_override = attrs.envs_override;
-    let keys_build = if is_override {
-        quote! {
-            let __keys: Vec<String> = vec![#(#names_ref.to_string()),*];
-        }
+    let keys_setup = if attrs.envs_override {
+        quote! { let __keys: Vec<String> = vec![#(#names_ref.to_string()),*]; }
     } else {
-        quote! {
-            let __keys: Vec<String> = vec![#(::std::format!("{}_{}", __prefix, #names_ref)),*];
-        }
+        quote! { let __keys: Vec<String> = vec![#(::std::format!("{}_{}", __prefix, #names_ref)),*]; }
     };
+    let refs_setup = quote! { let __key_refs: Vec<&str> = __keys.iter().map(|s| s.as_str()).collect(); };
+    (keys_setup, refs_setup)
+}
 
-    Ok(quote! {
-        {
-            #keys_build
-            let __key_refs: Vec<&str> = __keys.iter().map(|s| s.as_str()).collect();
-            if __key_refs.iter().any(|__k| ::std::env::var(__k).is_ok()) {
-                self.#field_name = ::conflaguration::resolve(&__key_refs)?;
-            }
+fn gen_override_guard(field_name: &syn::Ident, keys_ref: TokenStream2) -> TokenStream2 {
+    quote! {
+        if (#keys_ref).iter().any(|__k| ::std::env::var(__k).is_ok()) {
+            self.#field_name = ::conflaguration::resolve(#keys_ref)?;
         }
-    })
+    }
+}
+
+fn gen_construct_resolve(
+    field_name_str: &str,
+    attrs: &FieldAttrs,
+    prefix_mode: &PrefixMode<'_>,
+) -> TokenStream2 {
+    match prefix_mode {
+        PrefixMode::Static(prefix) => {
+            let keys = build_key_list(prefix, field_name_str, attrs);
+            let keys_ref = &keys;
+            gen_resolve_call(quote! { &[#(#keys_ref),*] }, attrs)
+        }
+        PrefixMode::Dynamic => {
+            let (keys_setup, refs_setup) = dynamic_key_tokens(field_name_str, attrs);
+            let resolve = gen_resolve_call(quote! { &__key_refs }, attrs);
+            quote! { { #keys_setup #refs_setup #resolve } }
+        }
+    }
+}
+
+fn gen_override_resolve(
+    field_name: &syn::Ident,
+    field_name_str: &str,
+    attrs: &FieldAttrs,
+    prefix_mode: &PrefixMode<'_>,
+) -> TokenStream2 {
+    match prefix_mode {
+        PrefixMode::Static(prefix) => {
+            let keys = build_key_list(prefix, field_name_str, attrs);
+            let keys_ref = &keys;
+            let keys_expr = quote! { &[#(#keys_ref),*] };
+            let guard = gen_override_guard(field_name, quote! { __keys });
+            quote! { { let __keys: &[&str] = #keys_expr; #guard } }
+        }
+        PrefixMode::Dynamic => {
+            let (keys_setup, refs_setup) = dynamic_key_tokens(field_name_str, attrs);
+            let guard = gen_override_guard(field_name, quote! { &__key_refs });
+            quote! { { #keys_setup #refs_setup #guard } }
+        }
+    }
+}
+
+fn gen_field_construct(
+    field: &syn::Field,
+    prefix_mode: &PrefixMode<'_>,
+) -> syn::Result<TokenStream2> {
+    let field_name = field
+        .ident
+        .as_ref()
+        .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
+    let attrs = parse_field_attrs(field)?;
+
+    if attrs.skip {
+        return Ok(quote! { ::core::default::Default::default() });
+    }
+    if attrs.nested {
+        let prefix = nested_prefix(&field.ty, &attrs, prefix_mode);
+        return Ok(gen_nested_construct(&field.ty, prefix));
+    }
+    Ok(gen_construct_resolve(&field_name.to_string(), &attrs, prefix_mode))
+}
+
+fn gen_field_override(
+    field: &syn::Field,
+    prefix_mode: &PrefixMode<'_>,
+) -> syn::Result<TokenStream2> {
+    let field_name = field
+        .ident
+        .as_ref()
+        .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
+    let attrs = parse_field_attrs(field)?;
+
+    if attrs.skip {
+        return Ok(quote! {});
+    }
+    if attrs.nested {
+        let prefix = nested_prefix(&field.ty, &attrs, prefix_mode);
+        return Ok(gen_nested_override(field_name, prefix));
+    }
+    Ok(gen_override_resolve(field_name, &field_name.to_string(), &attrs, prefix_mode))
 }
 
 fn derive_settings_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
@@ -464,6 +388,9 @@ fn derive_settings_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
         _ => return Err(syn::Error::new(input.ident.span(), "Settings can only be derived on structs")),
     };
 
+    let static_prefix = PrefixMode::Static(&struct_attrs.prefix);
+    let dynamic_prefix = PrefixMode::Dynamic;
+
     let mut static_exprs = Vec::new();
     let mut dynamic_exprs = Vec::new();
     let mut override_static_stmts = Vec::new();
@@ -473,10 +400,10 @@ fn derive_settings_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
             .ident
             .as_ref()
             .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-        let static_expr = gen_field_expr(field, &struct_attrs.prefix)?;
-        let dynamic_expr = gen_field_expr_dynamic(field)?;
-        let override_static = gen_override_field_expr(field, &struct_attrs.prefix)?;
-        let override_dynamic = gen_override_field_expr_dynamic(field)?;
+        let static_expr = gen_field_construct(field, &static_prefix)?;
+        let dynamic_expr = gen_field_construct(field, &dynamic_prefix)?;
+        let override_static = gen_field_override(field, &static_prefix)?;
+        let override_dynamic = gen_field_override(field, &dynamic_prefix)?;
         static_exprs.push(quote! { #field_name: #static_expr });
         dynamic_exprs.push(quote! { #field_name: #dynamic_expr });
         override_static_stmts.push(override_static);
@@ -585,6 +512,58 @@ fn derive_validate_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
     })
 }
 
+fn gen_display_skip(field_name_str: &str, field_name: &syn::Ident) -> TokenStream2 {
+    quote! { ::std::writeln!(__f, "{}{} = {:?} (skipped)", __indent, #field_name_str, self.#field_name)?; }
+}
+
+fn gen_display_nested_static(field_name_str: &str, field_name: &syn::Ident) -> TokenStream2 {
+    quote! {
+        ::std::writeln!(__f, "{}{}:", __indent, #field_name_str)?;
+        ::conflaguration::ConfigDisplay::fmt_config(&self.#field_name, __f, __depth + 1)?;
+    }
+}
+
+fn gen_display_nested_dynamic(
+    field_name_str: &str,
+    field_name: &syn::Ident,
+    field_type: &syn::Type,
+    attrs: &FieldAttrs,
+) -> TokenStream2 {
+    match &attrs.override_prefix {
+        Some(Some(explicit)) => quote! {
+            ::std::writeln!(__f, "{}{}:", __indent, #field_name_str)?;
+            ::conflaguration::ConfigDisplay::fmt_config_with_prefix(&self.#field_name, __f, __depth + 1, #explicit)?;
+        },
+        Some(None) => quote! {
+            ::std::writeln!(__f, "{}{}:", __indent, #field_name_str)?;
+            {
+                let __nested_pfx = match <#field_type as ::conflaguration::Settings>::PREFIX {
+                    Some(__inner) => ::std::format!("{}_{}", __prefix, __inner),
+                    None => __prefix.to_string(),
+                };
+                ::conflaguration::ConfigDisplay::fmt_config_with_prefix(&self.#field_name, __f, __depth + 1, &__nested_pfx)?;
+            }
+        },
+        None => quote! {
+            ::std::writeln!(__f, "{}{}:", __indent, #field_name_str)?;
+            ::conflaguration::ConfigDisplay::fmt_config(&self.#field_name, __f, __depth + 1)?;
+        },
+    }
+}
+
+fn gen_display_value(
+    field_name_str: &str,
+    field_name: &syn::Ident,
+    attrs: &FieldAttrs,
+    keys_display_expr: TokenStream2,
+) -> TokenStream2 {
+    if attrs.sensitive {
+        quote! { ::std::writeln!(__f, "{}{} = *** ({})", __indent, #field_name_str, #keys_display_expr)?; }
+    } else {
+        quote! { ::std::writeln!(__f, "{}{} = {:?} ({})", __indent, #field_name_str, self.#field_name, #keys_display_expr)?; }
+    }
+}
+
 fn derive_config_display_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
     let input: DeriveInput = syn::parse2(input)?;
     let struct_attrs = parse_struct_attrs(&input)?;
@@ -597,7 +576,9 @@ fn derive_config_display_impl(input: TokenStream2) -> syn::Result<TokenStream2> 
         _ => return Err(syn::Error::new(input.ident.span(), "ConfigDisplay can only be derived on structs")),
     };
 
-    let mut display_lines = Vec::new();
+    let mut static_lines = Vec::new();
+    let mut dynamic_lines = Vec::new();
+
     for field in fields {
         let field_name = field
             .ident
@@ -606,33 +587,40 @@ fn derive_config_display_impl(input: TokenStream2) -> syn::Result<TokenStream2> 
         let field_name_str = field_name.to_string();
         let attrs = parse_field_attrs(field)?;
 
-        if attrs.skip {
-            display_lines.push(quote! {
-                ::std::writeln!(__f, "{}{} = {:?} (skipped)", __indent, #field_name_str, self.#field_name)?;
-            });
-            continue;
-        }
-
-        if attrs.nested {
-            display_lines.push(quote! {
-                ::std::writeln!(__f, "{}{}:", __indent, #field_name_str)?;
-                ::conflaguration::ConfigDisplay::fmt_config(&self.#field_name, __f, __depth + 1)?;
-            });
-            continue;
-        }
-
-        let keys = build_key_list(&struct_attrs.prefix, &field_name_str, &attrs);
-        let keys_display = keys.join(", ");
-
-        if attrs.sensitive {
-            display_lines.push(quote! {
-                ::std::writeln!(__f, "{}{} = *** ({})", __indent, #field_name_str, #keys_display)?;
-            });
+        let static_keys = build_key_list(&struct_attrs.prefix, &field_name_str, &attrs);
+        let static_keys_display = static_keys.join(", ");
+        static_lines.push(if attrs.skip {
+            gen_display_skip(&field_name_str, field_name)
+        } else if attrs.nested {
+            gen_display_nested_static(&field_name_str, field_name)
         } else {
-            display_lines.push(quote! {
-                ::std::writeln!(__f, "{}{} = {:?} ({})", __indent, #field_name_str, self.#field_name, #keys_display)?;
-            });
-        }
+            gen_display_value(&field_name_str, field_name, &attrs, quote! { #static_keys_display })
+        });
+
+        let names = if attrs.envs.is_empty() {
+            vec![field_name_to_env_key(&field_name_str)]
+        } else {
+            attrs.envs.clone()
+        };
+        let names_ref = &names;
+        let dynamic_keys_expr = if attrs.envs_override {
+            let joined = names.join(", ");
+            quote! { #joined }
+        } else {
+            quote! {
+                {
+                    let __keys: Vec<String> = vec![#(::std::format!("{}_{}", __prefix, #names_ref)),*];
+                    __keys.join(", ")
+                }
+            }
+        };
+        dynamic_lines.push(if attrs.skip {
+            gen_display_skip(&field_name_str, field_name)
+        } else if attrs.nested {
+            gen_display_nested_dynamic(&field_name_str, field_name, &field.ty, &attrs)
+        } else {
+            gen_display_value(&field_name_str, field_name, &attrs, dynamic_keys_expr)
+        });
     }
 
     let struct_name = &input.ident;
@@ -642,7 +630,13 @@ fn derive_config_display_impl(input: TokenStream2) -> syn::Result<TokenStream2> 
         impl #impl_generics ::conflaguration::ConfigDisplay for #struct_name #type_generics #where_clause {
             fn fmt_config(&self, __f: &mut ::std::fmt::Formatter<'_>, __depth: usize) -> ::std::fmt::Result {
                 let __indent = "  ".repeat(__depth);
-                #(#display_lines)*
+                #(#static_lines)*
+                Ok(())
+            }
+
+            fn fmt_config_with_prefix(&self, __f: &mut ::std::fmt::Formatter<'_>, __depth: usize, __prefix: &str) -> ::std::fmt::Result {
+                let __indent = "  ".repeat(__depth);
+                #(#dynamic_lines)*
                 Ok(())
             }
         }
@@ -653,4 +647,73 @@ fn derive_config_display_impl(input: TokenStream2) -> syn::Result<TokenStream2> 
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn settings_rejects_enum() {
+        let input: TokenStream2 = quote! { enum Foo { A, B } };
+        let result = derive_settings_impl(input);
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("structs"));
+    }
+
+    #[test]
+    fn settings_rejects_tuple_struct() {
+        let input: TokenStream2 = quote! { struct Foo(u16); };
+        let result = derive_settings_impl(input);
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("named"));
+    }
+
+    #[test]
+    fn validate_rejects_enum() {
+        let input: TokenStream2 = quote! { enum Bar { X } };
+        let result = derive_validate_impl(input);
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("structs"));
+    }
+
+    #[test]
+    fn validate_rejects_tuple_struct() {
+        let input: TokenStream2 = quote! { struct Bar(String); };
+        let result = derive_validate_impl(input);
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("named"));
+    }
+
+    #[test]
+    fn config_display_rejects_enum() {
+        let input: TokenStream2 = quote! { enum Baz { Y } };
+        let result = derive_config_display_impl(input);
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("structs"));
+    }
+
+    #[test]
+    fn unknown_settings_attribute_errors() {
+        let input: TokenStream2 = quote! {
+            #[settings(bogus = "nope")]
+            struct Bad {
+                field: u16,
+            }
+        };
+        let result = derive_settings_impl(input);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn unknown_setting_field_attribute_errors() {
+        let input: TokenStream2 = quote! {
+            struct Bad {
+                #[setting(bogus)]
+                field: u16,
+            }
+        };
+        let result = derive_settings_impl(input);
+        assert!(result.is_err());
+    }
 }
