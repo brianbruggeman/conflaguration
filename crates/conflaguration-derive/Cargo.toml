@@ -1,6 +1,6 @@
 [package]
 name = "conflaguration-derive"
-version = "1.0.0"
+version = "1.1.0"
 edition = "2024"
 description = "derive macro for conflaguration settings structs"
 license = "MIT"

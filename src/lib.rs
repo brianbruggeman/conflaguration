@@ -194,9 +194,8 @@ where
 {
     let mut matched_key: Option<&str> = None;
     let raw = keys.iter().find_map(|key| {
-        std::env::var(key).ok().map(|val| {
+        std::env::var(key).ok().inspect(|_| {
             matched_key = Some(key);
-            val
         })
     });
     let input = raw.as_deref().unwrap_or(default_str);
