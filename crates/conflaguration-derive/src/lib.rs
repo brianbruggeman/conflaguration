@@ -38,6 +38,7 @@ pub fn derive_config_display(input: TokenStream) -> TokenStream {
 
 struct StructAttrs {
     prefix: Option<String>,
+    resolve_with: Option<syn::Path>,
 }
 
 struct FieldAttrs {
@@ -45,6 +46,8 @@ struct FieldAttrs {
     envs_override: bool,
     default: Option<Lit>,
     default_str: Option<String>,
+    use_default: bool,
+    resolve_with: Option<syn::Path>,
     nested: bool,
     skip: bool,
     sensitive: bool,
@@ -68,6 +71,7 @@ impl Parse for BracketedStrings {
 
 fn parse_struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
     let mut prefix = None;
+    let mut resolve_with = None;
     for attr in &input.attrs {
         if !attr.path().is_ident("settings") {
             continue;
@@ -79,10 +83,17 @@ fn parse_struct_attrs(input: &DeriveInput) -> syn::Result<StructAttrs> {
                 prefix = Some(lit.value());
                 return Ok(());
             }
+            if meta.path.is_ident("resolve_with") {
+                let value = meta.value()?;
+                let lit: syn::LitStr = value.parse()?;
+                let path: syn::Path = lit.parse()?;
+                resolve_with = Some(path);
+                return Ok(());
+            }
             Err(meta.error("unknown settings attribute"))
         })?;
     }
-    Ok(StructAttrs { prefix })
+    Ok(StructAttrs { prefix, resolve_with })
 }
 
 fn parse_env_list(meta: &syn::meta::ParseNestedMeta<'_>) -> syn::Result<Vec<String>> {
@@ -102,6 +113,8 @@ fn parse_field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
         envs_override: false,
         default: None,
         default_str: None,
+        use_default: false,
+        resolve_with: None,
         nested: false,
         skip: false,
         sensitive: false,
@@ -124,15 +137,26 @@ fn parse_field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
                     return Ok(());
                 }
                 if meta.path.is_ident("default") {
-                    let value = meta.value()?;
-                    let lit: Lit = value.parse()?;
-                    attrs.default = Some(lit);
+                    if meta.input.peek(Token![=]) {
+                        let value = meta.value()?;
+                        let lit: Lit = value.parse()?;
+                        attrs.default = Some(lit);
+                    } else {
+                        attrs.use_default = true;
+                    }
                     return Ok(());
                 }
                 if meta.path.is_ident("default_str") {
                     let value = meta.value()?;
                     let lit: syn::LitStr = value.parse()?;
                     attrs.default_str = Some(lit.value());
+                    return Ok(());
+                }
+                if meta.path.is_ident("resolve_with") {
+                    let value = meta.value()?;
+                    let lit: syn::LitStr = value.parse()?;
+                    let path: syn::Path = lit.parse()?;
+                    attrs.resolve_with = Some(path);
                     return Ok(());
                 }
                 if meta.path.is_ident("nested") {
@@ -160,6 +184,22 @@ fn parse_field_attrs(field: &syn::Field) -> syn::Result<FieldAttrs> {
                 Err(meta.error("unknown setting attribute"))
             })?;
         }
+    }
+
+    let span = field.ident.as_ref().map_or_else(|| field.span(), |ident| ident.span());
+
+    let has_any_default = attrs.default.is_some() || attrs.default_str.is_some() || attrs.use_default;
+    if (attrs.default.is_some() as u8 + attrs.default_str.is_some() as u8 + attrs.use_default as u8) > 1 {
+        return Err(syn::Error::new(span, "only one of default, default = value, or default_str allowed"));
+    }
+    if attrs.skip && (has_any_default || attrs.resolve_with.is_some() || !attrs.envs.is_empty() || attrs.envs_override || attrs.nested || attrs.sensitive) {
+        return Err(syn::Error::new(span, "skip cannot be combined with other setting attributes"));
+    }
+    if attrs.nested && (has_any_default || attrs.resolve_with.is_some() || !attrs.envs.is_empty() || attrs.envs_override || attrs.sensitive) {
+        return Err(syn::Error::new(span, "nested cannot be combined with default, default_str, resolve_with, envs, override, or sensitive"));
+    }
+    if attrs.override_prefix.is_some() && !attrs.nested {
+        return Err(syn::Error::new(span, "override_prefix requires nested"));
     }
 
     Ok(attrs)
@@ -191,7 +231,35 @@ fn build_key_list(prefix: &Option<String>, field_name: &str, attrs: &FieldAttrs)
     keys
 }
 
+fn gen_resolve_with_call(keys_expr: TokenStream2, func: &syn::Path, attrs: &FieldAttrs) -> TokenStream2 {
+    if let Some(lit) = &attrs.default {
+        return quote! {
+            ::conflaguration::resolve_with_or(#keys_expr, #func, #lit)?
+        };
+    }
+
+    if attrs.use_default {
+        return quote! {
+            ::conflaguration::resolve_with_or(#keys_expr, #func, ::core::default::Default::default())?
+        };
+    }
+
+    if let Some(default_str) = &attrs.default_str {
+        return quote! {
+            ::conflaguration::resolve_with_or_str(#keys_expr, #func, #default_str)?
+        };
+    }
+
+    quote! {
+        ::conflaguration::resolve_with(#keys_expr, #func)?
+    }
+}
+
 fn gen_resolve_call(keys_expr: TokenStream2, attrs: &FieldAttrs) -> TokenStream2 {
+    if let Some(func) = &attrs.resolve_with {
+        return gen_resolve_with_call(keys_expr, func, attrs);
+    }
+
     if let Some(lit) = &attrs.default {
         if matches!(lit, Lit::Str(_)) {
             let lit_str = match lit {
@@ -204,6 +272,12 @@ fn gen_resolve_call(keys_expr: TokenStream2, attrs: &FieldAttrs) -> TokenStream2
         }
         return quote! {
             ::conflaguration::resolve_or(#keys_expr, #lit)?
+        };
+    }
+
+    if attrs.use_default {
+        return quote! {
+            ::conflaguration::resolve_or_else(#keys_expr, || ::core::default::Default::default())?
         };
     }
 
@@ -223,11 +297,7 @@ enum PrefixMode<'a> {
     Dynamic,
 }
 
-fn nested_prefix(
-    field_type: &syn::Type,
-    attrs: &FieldAttrs,
-    prefix_mode: &PrefixMode<'_>,
-) -> Option<TokenStream2> {
+fn nested_prefix(field_type: &syn::Type, attrs: &FieldAttrs, prefix_mode: &PrefixMode<'_>) -> Option<TokenStream2> {
     match &attrs.override_prefix {
         Some(Some(explicit)) => Some(quote! { #explicit.to_owned() }),
         Some(None) => {
@@ -247,10 +317,7 @@ fn nested_prefix(
     }
 }
 
-fn gen_nested_construct(
-    field_type: &syn::Type,
-    prefix: Option<TokenStream2>,
-) -> TokenStream2 {
+fn gen_nested_construct(field_type: &syn::Type, prefix: Option<TokenStream2>) -> TokenStream2 {
     match prefix {
         Some(pfx) => quote! {
             { let __nested = #pfx; <#field_type as ::conflaguration::Settings>::from_env_with_prefix(&__nested)? }
@@ -259,10 +326,7 @@ fn gen_nested_construct(
     }
 }
 
-fn gen_nested_override(
-    field_name: &syn::Ident,
-    prefix: Option<TokenStream2>,
-) -> TokenStream2 {
+fn gen_nested_override(field_name: &syn::Ident, prefix: Option<TokenStream2>) -> TokenStream2 {
     match prefix {
         Some(pfx) => quote! {
             { let __nested = #pfx; ::conflaguration::Settings::override_from_env_with_prefix(&mut self.#field_name, &__nested)?; }
@@ -272,11 +336,7 @@ fn gen_nested_override(
 }
 
 fn dynamic_key_tokens(field_name_str: &str, attrs: &FieldAttrs) -> (TokenStream2, TokenStream2) {
-    let names = if attrs.envs.is_empty() {
-        vec![field_name_to_env_key(field_name_str)]
-    } else {
-        attrs.envs.clone()
-    };
+    let names = if attrs.envs.is_empty() { vec![field_name_to_env_key(field_name_str)] } else { attrs.envs.clone() };
     let names_ref = &names;
     let keys_setup = if attrs.envs_override {
         quote! { let __keys: Vec<String> = vec![#(#names_ref.to_string()),*]; }
@@ -287,19 +347,23 @@ fn dynamic_key_tokens(field_name_str: &str, attrs: &FieldAttrs) -> (TokenStream2
     (keys_setup, refs_setup)
 }
 
-fn gen_override_guard(field_name: &syn::Ident, keys_ref: TokenStream2) -> TokenStream2 {
+fn gen_override_guard(field_name: &syn::Ident, keys_ref: TokenStream2, resolve_with: Option<&syn::Path>) -> TokenStream2 {
+    let assign = match resolve_with {
+        Some(func) => quote! {
+            self.#field_name = ::conflaguration::resolve_with(#keys_ref, #func)?;
+        },
+        None => quote! {
+            self.#field_name = ::conflaguration::resolve(#keys_ref)?;
+        },
+    };
     quote! {
         if (#keys_ref).iter().any(|__k| ::std::env::var(__k).is_ok()) {
-            self.#field_name = ::conflaguration::resolve(#keys_ref)?;
+            #assign
         }
     }
 }
 
-fn gen_construct_resolve(
-    field_name_str: &str,
-    attrs: &FieldAttrs,
-    prefix_mode: &PrefixMode<'_>,
-) -> TokenStream2 {
+fn gen_construct_resolve(field_name_str: &str, attrs: &FieldAttrs, prefix_mode: &PrefixMode<'_>) -> TokenStream2 {
     match prefix_mode {
         PrefixMode::Static(prefix) => {
             let keys = build_key_list(prefix, field_name_str, attrs);
@@ -314,37 +378,33 @@ fn gen_construct_resolve(
     }
 }
 
-fn gen_override_resolve(
-    field_name: &syn::Ident,
-    field_name_str: &str,
-    attrs: &FieldAttrs,
-    prefix_mode: &PrefixMode<'_>,
-) -> TokenStream2 {
+fn gen_override_resolve(field_name: &syn::Ident, field_name_str: &str, attrs: &FieldAttrs, prefix_mode: &PrefixMode<'_>) -> TokenStream2 {
     match prefix_mode {
         PrefixMode::Static(prefix) => {
             let keys = build_key_list(prefix, field_name_str, attrs);
             let keys_ref = &keys;
             let keys_expr = quote! { &[#(#keys_ref),*] };
-            let guard = gen_override_guard(field_name, quote! { __keys });
+            let guard = gen_override_guard(field_name, quote! { __keys }, attrs.resolve_with.as_ref());
             quote! { { let __keys: &[&str] = #keys_expr; #guard } }
         }
         PrefixMode::Dynamic => {
             let (keys_setup, refs_setup) = dynamic_key_tokens(field_name_str, attrs);
-            let guard = gen_override_guard(field_name, quote! { &__key_refs });
+            let guard = gen_override_guard(field_name, quote! { &__key_refs }, attrs.resolve_with.as_ref());
             quote! { { #keys_setup #refs_setup #guard } }
         }
     }
 }
 
-fn gen_field_construct(
-    field: &syn::Field,
-    prefix_mode: &PrefixMode<'_>,
-) -> syn::Result<TokenStream2> {
+fn gen_field_construct(field: &syn::Field, prefix_mode: &PrefixMode<'_>, struct_attrs: &StructAttrs) -> syn::Result<TokenStream2> {
     let field_name = field
         .ident
         .as_ref()
         .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-    let attrs = parse_field_attrs(field)?;
+    let mut attrs = parse_field_attrs(field)?;
+
+    if attrs.resolve_with.is_none() && attrs.default.is_none() && !attrs.use_default {
+        attrs.resolve_with.clone_from(&struct_attrs.resolve_with);
+    }
 
     if attrs.skip {
         return Ok(quote! { ::core::default::Default::default() });
@@ -356,15 +416,16 @@ fn gen_field_construct(
     Ok(gen_construct_resolve(&field_name.to_string(), &attrs, prefix_mode))
 }
 
-fn gen_field_override(
-    field: &syn::Field,
-    prefix_mode: &PrefixMode<'_>,
-) -> syn::Result<TokenStream2> {
+fn gen_field_override(field: &syn::Field, prefix_mode: &PrefixMode<'_>, struct_attrs: &StructAttrs) -> syn::Result<TokenStream2> {
     let field_name = field
         .ident
         .as_ref()
         .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-    let attrs = parse_field_attrs(field)?;
+    let mut attrs = parse_field_attrs(field)?;
+
+    if attrs.resolve_with.is_none() && attrs.default.is_none() && !attrs.use_default {
+        attrs.resolve_with.clone_from(&struct_attrs.resolve_with);
+    }
 
     if attrs.skip {
         return Ok(quote! {});
@@ -400,10 +461,10 @@ fn derive_settings_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
             .ident
             .as_ref()
             .ok_or_else(|| syn::Error::new(field.span(), "tuple struct fields not supported"))?;
-        let static_expr = gen_field_construct(field, &static_prefix)?;
-        let dynamic_expr = gen_field_construct(field, &dynamic_prefix)?;
-        let override_static = gen_field_override(field, &static_prefix)?;
-        let override_dynamic = gen_field_override(field, &dynamic_prefix)?;
+        let static_expr = gen_field_construct(field, &static_prefix, &struct_attrs)?;
+        let dynamic_expr = gen_field_construct(field, &dynamic_prefix, &struct_attrs)?;
+        let override_static = gen_field_override(field, &static_prefix, &struct_attrs)?;
+        let override_dynamic = gen_field_override(field, &dynamic_prefix, &struct_attrs)?;
         static_exprs.push(quote! { #field_name: #static_expr });
         dynamic_exprs.push(quote! { #field_name: #dynamic_expr });
         override_static_stmts.push(override_static);
@@ -523,12 +584,7 @@ fn gen_display_nested_static(field_name_str: &str, field_name: &syn::Ident) -> T
     }
 }
 
-fn gen_display_nested_dynamic(
-    field_name_str: &str,
-    field_name: &syn::Ident,
-    field_type: &syn::Type,
-    attrs: &FieldAttrs,
-) -> TokenStream2 {
+fn gen_display_nested_dynamic(field_name_str: &str, field_name: &syn::Ident, field_type: &syn::Type, attrs: &FieldAttrs) -> TokenStream2 {
     match &attrs.override_prefix {
         Some(Some(explicit)) => quote! {
             ::std::writeln!(__f, "{}{}:", __indent, #field_name_str)?;
@@ -551,12 +607,7 @@ fn gen_display_nested_dynamic(
     }
 }
 
-fn gen_display_value(
-    field_name_str: &str,
-    field_name: &syn::Ident,
-    attrs: &FieldAttrs,
-    keys_display_expr: TokenStream2,
-) -> TokenStream2 {
+fn gen_display_value(field_name_str: &str, field_name: &syn::Ident, attrs: &FieldAttrs, keys_display_expr: TokenStream2) -> TokenStream2 {
     if attrs.sensitive {
         quote! { ::std::writeln!(__f, "{}{} = *** ({})", __indent, #field_name_str, #keys_display_expr)?; }
     } else {

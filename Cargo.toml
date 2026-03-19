@@ -4,7 +4,7 @@ members = [".", "crates/*", "examples/*"]
 
 [package]
 name = "conflaguration"
-version = "1.1.0"
+version = "1.2.0"
 edition = "2024"
 description = "typed settings structs from environment variables"
 license = "MIT"
@@ -13,9 +13,9 @@ keywords = ["env", "settings", "config", "derive", "configuration"]
 categories = ["config"]
 
 [dependencies]
-environs = "1.1.0"
+environs = "1.2.0"
 thiserror = "2"
-conflaguration-derive = { version = "1.0.0", path = "crates/conflaguration-derive", optional = true }
+conflaguration-derive = { version = "1.1.0", path = "crates/conflaguration-derive", optional = true }
 serde = { version = "1", optional = true }
 toml = { version = "0.8", optional = true }
 serde_json = { version = "1", optional = true }
@@ -32,6 +32,7 @@ expect_used = "deny"
 serde = { version = "1", features = ["derive"] }
 temp-env = "0.3.6"
 tempfile = "3.25.0"
+trybuild = "1.0.116"
 
 [features]
 derive = ["dep:conflaguration-derive"]
