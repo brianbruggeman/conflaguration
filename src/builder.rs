@@ -3,6 +3,19 @@ use crate::Result;
 use crate::Settings;
 use crate::Validate;
 
+/// Fluent builder for layered configuration.
+///
+/// Sources are applied in call order; later sources override earlier ones.
+/// Errors short-circuit — once an error occurs, subsequent sources are skipped.
+///
+/// ```rust,ignore
+/// let config: MyConfig = conflaguration::builder()
+///     .defaults()
+///     .file("config.toml")
+///     .env()
+///     .validate()
+///     .build()?;
+/// ```
 pub struct ConfigBuilder<T> {
     state: Option<Result<T>>,
 }
@@ -18,6 +31,7 @@ impl<T> ConfigBuilder<T> {
         Self { state: None }
     }
 
+    /// Seed with `T::default()`. Only applies if no prior source was set.
     pub fn defaults(self) -> Self
     where
         T: Default,
@@ -29,6 +43,7 @@ impl<T> ConfigBuilder<T> {
         }
     }
 
+    /// Load from environment variables. Overrides existing values if state is already set.
     pub fn env(self) -> Self
     where
         T: Settings,
@@ -43,6 +58,7 @@ impl<T> ConfigBuilder<T> {
         }
     }
 
+    /// Load from environment variables using a runtime prefix instead of the struct's static prefix.
     pub fn env_with_prefix(self, prefix: &str) -> Self
     where
         T: Settings,
@@ -59,6 +75,7 @@ impl<T> ConfigBuilder<T> {
         }
     }
 
+    /// Mutate the current value in-place. Skipped if state is error or empty.
     pub fn apply<F: FnOnce(&mut T)>(self, func: F) -> Self {
         match self.state {
             Some(Ok(mut value)) => {
@@ -69,6 +86,7 @@ impl<T> ConfigBuilder<T> {
         }
     }
 
+    /// Run validation. Converts ok state to error state if validation fails.
     pub fn validate(self) -> Self
     where
         T: Validate,
@@ -82,6 +100,7 @@ impl<T> ConfigBuilder<T> {
         }
     }
 
+    /// Consume the builder and return the config or the first error encountered.
     pub fn build(self) -> Result<T> {
         match self.state {
             Some(result) => result,
@@ -95,6 +114,7 @@ impl<T> ConfigBuilder<T>
 where
     T: serde::de::DeserializeOwned,
 {
+    /// Load from a config file. Format detected by lowercase extension (`.toml`, `.json`, `.yaml`, `.yml`).
     pub fn file(self, path: impl AsRef<std::path::Path>) -> Self {
         match self.state {
             Some(Err(_)) => self,
