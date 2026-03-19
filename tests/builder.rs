@@ -217,10 +217,78 @@ fn file_loads_config() {
 
 #[cfg(feature = "toml")]
 #[test]
+fn env_then_file_overwrites_env_state() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "host = \"fromfile.com\"\nport = 1111\n").unwrap_or_else(|err| panic!("write failed: {err}"));
+
+    temp_env::with_vars([("BTEST_HOST", Some("fromenv.com")), ("BTEST_PORT", Some("2222"))], || {
+        let config: TestConfig = conflaguration::builder()
+            .env()
+            .file(&path)
+            .build()
+            .unwrap_or_else(|err| panic!("build failed: {err}"));
+        assert_eq!(config.host, "fromfile.com", "file() after env() should overwrite");
+        assert_eq!(config.port, 1111);
+    });
+}
+
+#[cfg(feature = "toml")]
+#[test]
+fn file_then_env_overwrites_file_state() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "host = \"fromfile.com\"\nport = 1111\n").unwrap_or_else(|err| panic!("write failed: {err}"));
+
+    temp_env::with_vars([("BTEST_HOST", Some("fromenv.com")), ("BTEST_PORT", Some("2222"))], || {
+        let config: TestConfig = conflaguration::builder()
+            .file(&path)
+            .env()
+            .build()
+            .unwrap_or_else(|err| panic!("build failed: {err}"));
+        assert_eq!(config.host, "fromenv.com", "env() after file() should overwrite");
+        assert_eq!(config.port, 2222);
+    });
+}
+
+#[cfg(feature = "toml")]
+#[test]
 fn file_error_short_circuits() {
     let bad_path = std::path::Path::new("/nonexistent/config.toml");
     let result: Result<TestConfig> = conflaguration::builder().file(bad_path).env().build();
     assert!(matches!(result, Err(Error::Io(_))));
+}
+
+#[test]
+fn default_builder_constructs_same_as_new() {
+    let from_default: conflaguration::ConfigBuilder<TestConfig> = Default::default();
+    let from_new: conflaguration::ConfigBuilder<TestConfig> = conflaguration::builder();
+    assert!(matches!(from_default.build(), Err(Error::NoSource)));
+    assert!(matches!(from_new.build(), Err(Error::NoSource)));
+}
+
+#[test]
+fn defaults_after_error_preserves_error() {
+    temp_env::with_vars([("BTEST_HOST", Some("")), ("BTEST_PORT", Some("0"))], || {
+        let result: Result<TestConfig> = conflaguration::builder().env().validate().defaults().build();
+        assert!(matches!(result, Err(Error::Validation { .. })));
+    });
+}
+
+#[test]
+fn env_after_error_preserves_error() {
+    temp_env::with_vars([("BTEST_HOST", Some("")), ("BTEST_PORT", Some("0"))], || {
+        let result: Result<TestConfig> = conflaguration::builder().env().validate().env().build();
+        assert!(matches!(result, Err(Error::Validation { .. })));
+    });
+}
+
+#[test]
+fn env_with_prefix_after_error_preserves_error() {
+    temp_env::with_vars([("BTEST_HOST", Some("")), ("BTEST_PORT", Some("0"))], || {
+        let result: Result<TestConfig> = conflaguration::builder().env().validate().env_with_prefix("IGNORED").build();
+        assert!(matches!(result, Err(Error::Validation { .. })));
+    });
 }
 
 #[test]

@@ -114,6 +114,71 @@ fn from_file_detects_yml_extension() {
 
 #[cfg(feature = "toml")]
 #[test]
+fn from_file_toml_with_malformed_contents() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("bad.toml");
+    let mut file = std::fs::File::create(&path).unwrap_or_else(|err| panic!("create failed: {err}"));
+    write!(file, "this is not valid toml {{{{").unwrap_or_else(|err| panic!("write failed: {err}"));
+    drop(file);
+
+    let result: conflaguration::Result<FileTestConfig> = conflaguration::from_file(&path);
+    assert!(matches!(result, Err(conflaguration::Error::Toml(_))));
+}
+
+#[cfg(feature = "json")]
+#[test]
+fn from_file_json_with_malformed_contents() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("bad.json");
+    let mut file = std::fs::File::create(&path).unwrap_or_else(|err| panic!("create failed: {err}"));
+    write!(file, "{{not valid json").unwrap_or_else(|err| panic!("write failed: {err}"));
+    drop(file);
+
+    let result: conflaguration::Result<FileTestConfig> = conflaguration::from_file(&path);
+    assert!(matches!(result, Err(conflaguration::Error::Json(_))));
+}
+
+#[cfg(feature = "yaml")]
+#[test]
+fn from_file_yaml_with_malformed_contents() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("bad.yaml");
+    let mut file = std::fs::File::create(&path).unwrap_or_else(|err| panic!("create failed: {err}"));
+    write!(file, ":\n  - :\n    - : [invalid").unwrap_or_else(|err| panic!("write failed: {err}"));
+    drop(file);
+
+    let result: conflaguration::Result<FileTestConfig> = conflaguration::from_file(&path);
+    assert!(matches!(result, Err(conflaguration::Error::Yaml(_))));
+}
+
+#[cfg(feature = "toml")]
+#[test]
+fn from_file_no_extension_returns_unsupported() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("config");
+    let mut file = std::fs::File::create(&path).unwrap_or_else(|err| panic!("create failed: {err}"));
+    write!(file, "port = 1234").unwrap_or_else(|err| panic!("write failed: {err}"));
+    drop(file);
+
+    let result: conflaguration::Result<FileTestConfig> = conflaguration::from_file(&path);
+    assert!(matches!(result, Err(conflaguration::Error::UnsupportedFormat(_))));
+}
+
+#[cfg(feature = "toml")]
+#[test]
+fn from_file_uppercase_extension_returns_unsupported() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("config.TOML");
+    let mut file = std::fs::File::create(&path).unwrap_or_else(|err| panic!("create failed: {err}"));
+    write!(file, "port = 1234\nhost = \"test\"\ndebug = false\n").unwrap_or_else(|err| panic!("write failed: {err}"));
+    drop(file);
+
+    let result: conflaguration::Result<FileTestConfig> = conflaguration::from_file(&path);
+    assert!(matches!(result, Err(conflaguration::Error::UnsupportedFormat(_))), "uppercase .TOML should not be recognized as toml");
+}
+
+#[cfg(feature = "toml")]
+#[test]
 fn from_file_returns_error_for_unsupported_format() {
     let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
     let path = dir.path().join("config.ini");
