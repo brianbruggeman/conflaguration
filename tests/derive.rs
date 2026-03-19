@@ -1378,22 +1378,28 @@ struct StructLevelWithTypedDefault {
 
 #[test]
 fn struct_level_resolve_with_skips_fields_with_typed_default() {
-    temp_env::with_vars([("STRUCT_RW_TYPED_TAGS", Some("a,b")), ("STRUCT_RW_TYPED_PORT", None::<&str>), ("STRUCT_RW_TYPED_DEBUG", None::<&str>)], || {
-        let config = StructLevelWithTypedDefault::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
-        assert_eq!(config.tags, vec!["a", "b"]);
-        assert_eq!(config.port, 8080);
-        assert!(!config.debug);
-    });
+    temp_env::with_vars(
+        [("STRUCT_RW_TYPED_TAGS", Some("a,b")), ("STRUCT_RW_TYPED_PORT", None::<&str>), ("STRUCT_RW_TYPED_DEBUG", None::<&str>)],
+        || {
+            let config = StructLevelWithTypedDefault::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+            assert_eq!(config.tags, vec!["a", "b"]);
+            assert_eq!(config.port, 8080);
+            assert!(!config.debug);
+        },
+    );
 }
 
 #[test]
 fn struct_level_resolve_with_typed_default_field_reads_env() {
-    temp_env::with_vars([("STRUCT_RW_TYPED_TAGS", Some("x")), ("STRUCT_RW_TYPED_PORT", Some("3000")), ("STRUCT_RW_TYPED_DEBUG", Some("true"))], || {
-        let config = StructLevelWithTypedDefault::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
-        assert_eq!(config.tags, vec!["x"]);
-        assert_eq!(config.port, 3000);
-        assert!(config.debug);
-    });
+    temp_env::with_vars(
+        [("STRUCT_RW_TYPED_TAGS", Some("x")), ("STRUCT_RW_TYPED_PORT", Some("3000")), ("STRUCT_RW_TYPED_DEBUG", Some("true"))],
+        || {
+            let config = StructLevelWithTypedDefault::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+            assert_eq!(config.tags, vec!["x"]);
+            assert_eq!(config.port, 3000);
+            assert!(config.debug);
+        },
+    );
 }
 
 #[test]
