@@ -1,0 +1,5 @@
+error: only named struct fields supported
+ --> tests/compile_fail/settings_on_tuple_struct.rs:4:8
+  |
+4 | struct BadConfig(u16);
+  |        ^^^^^^^^^

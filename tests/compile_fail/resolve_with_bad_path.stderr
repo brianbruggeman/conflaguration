@@ -1,0 +1,5 @@
+error: unexpected token
+ --> tests/compile_fail/resolve_with_bad_path.rs:5:30
+  |
+5 |     #[setting(resolve_with = "not a valid path!!!")]
+  |                              ^^^^^^^^^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: nested cannot be combined with default, default_str, resolve_with, envs, override, or sensitive
+  --> tests/compile_fail/nested_with_override.rs:11:5
+   |
+11 |     inner: Inner,
+   |     ^^^^^

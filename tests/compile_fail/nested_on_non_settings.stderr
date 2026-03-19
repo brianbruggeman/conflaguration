@@ -1,0 +1,35 @@
+error[E0277]: the trait bound `NotSettings: Settings` is not satisfied
+  --> tests/compile_fail/nested_on_non_settings.rs:11:12
+   |
+11 |     inner: NotSettings,
+   |            ^^^^^^^^^^^ unsatisfied trait bound
+   |
+help: the trait `Settings` is not implemented for `NotSettings`
+  --> tests/compile_fail/nested_on_non_settings.rs:3:1
+   |
+ 3 | struct NotSettings {
+   | ^^^^^^^^^^^^^^^^^^
+help: the trait `Settings` is implemented for `BadConfig`
+  --> tests/compile_fail/nested_on_non_settings.rs:7:10
+   |
+ 7 | #[derive(Settings)]
+   |          ^^^^^^^^
+   = note: this error originates in the derive macro `Settings` (in Nightly builds, run with -Z macro-backtrace for more info)
+
+error[E0277]: the trait bound `NotSettings: Settings` is not satisfied
+ --> tests/compile_fail/nested_on_non_settings.rs:7:10
+  |
+7 | #[derive(Settings)]
+  |          ^^^^^^^^ unsatisfied trait bound
+  |
+help: the trait `Settings` is not implemented for `NotSettings`
+ --> tests/compile_fail/nested_on_non_settings.rs:3:1
+  |
+3 | struct NotSettings {
+  | ^^^^^^^^^^^^^^^^^^
+help: the trait `Settings` is implemented for `BadConfig`
+ --> tests/compile_fail/nested_on_non_settings.rs:7:10
+  |
+7 | #[derive(Settings)]
+  |          ^^^^^^^^
+  = note: this error originates in the derive macro `Settings` (in Nightly builds, run with -Z macro-backtrace for more info)

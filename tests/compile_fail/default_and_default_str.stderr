@@ -1,0 +1,5 @@
+error: only one of default, default = value, or default_str allowed
+ --> tests/compile_fail/default_and_default_str.rs:6:5
+  |
+6 |     port: u16,
+  |     ^^^^

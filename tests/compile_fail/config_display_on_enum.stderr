@@ -1,0 +1,5 @@
+error: ConfigDisplay can only be derived on structs
+ --> tests/compile_fail/config_display_on_enum.rs:4:6
+  |
+4 | enum BadConfig {
+  |      ^^^^^^^^^

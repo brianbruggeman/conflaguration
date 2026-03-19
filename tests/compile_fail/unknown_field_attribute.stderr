@@ -1,0 +1,5 @@
+error: unknown setting attribute
+ --> tests/compile_fail/unknown_field_attribute.rs:5:15
+  |
+5 |     #[setting(bogus)]
+  |               ^^^^^

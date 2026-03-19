@@ -1,0 +1,5 @@
+error: skip cannot be combined with other setting attributes
+ --> tests/compile_fail/skip_with_override.rs:6:5
+  |
+6 |     field: u16,
+  |     ^^^^^
