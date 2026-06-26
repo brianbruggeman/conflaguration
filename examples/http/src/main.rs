@@ -4,7 +4,7 @@ use conflaguration::Validate;
 use example_database::DatabaseConfig;
 use example_logging::LoggingConfig;
 
-#[derive(serde::Deserialize, Settings, ConfigDisplay)]
+#[derive(serde::Deserialize, serde::Serialize, Settings, ConfigDisplay)]
 #[settings(prefix = "HTTP")]
 struct HttpConfig {
     #[setting(default = "0.0.0.0")]
@@ -26,11 +26,11 @@ struct HttpConfig {
     feature_compression: bool,
 
     #[serde(skip)]
-    #[setting(nested)]
+    #[setting(nested, override_prefix = "DB")]
     database: DatabaseConfig,
 
     #[serde(skip)]
-    #[setting(nested)]
+    #[setting(nested, override_prefix = "LOG")]
     logging: LoggingConfig,
 }
 
@@ -58,7 +58,21 @@ impl Validate for HttpConfig {
 fn main() -> conflaguration::Result<()> {
     conflaguration::load()?;
 
-    let config: HttpConfig = conflaguration::builder().file("config.toml").env().validate().build()?;
+    // the sub-configs are env-only (serde-skipped in the file), so build them
+    // from the environment up front — this applies their own #[setting(default)]s.
+    let database = DatabaseConfig::from_env()?;
+    let logging = LoggingConfig::from_env()?;
+
+    let config: HttpConfig = conflaguration::builder()
+        .file("config.toml") // http top-level fields
+        .env() // env overrides those
+        .override_with(move |cfg: &mut HttpConfig| {
+            // inject the env-built sub-configs explicitly
+            cfg.database = database;
+            cfg.logging = logging;
+        })
+        .validate()
+        .build()?;
 
     println!("{config}");
 

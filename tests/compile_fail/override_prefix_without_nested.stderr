@@ -1,4 +1,4 @@
-error: override_prefix requires nested
+error: prefix and override_prefix require nested
  --> tests/compile_fail/override_prefix_without_nested.rs:6:5
   |
 6 |     field: u16,

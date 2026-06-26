@@ -22,10 +22,11 @@ checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "conflaguration"
-version = "1.2.0"
+version = "2.0.0"
 dependencies = [
  "conflaguration-derive",
  "environs",
+ "memchr",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -38,7 +39,7 @@ dependencies = [
 
 [[package]]
 name = "conflaguration-derive"
-version = "1.1.0"
+version = "2.0.0"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -73,6 +74,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-codegen"
+version = "0.0.0"
+dependencies = [
+ "conflaguration",
+]
+
+[[package]]
 name = "example-database"
 version = "0.0.0"
 dependencies = [
@@ -94,6 +102,14 @@ name = "example-logging"
 version = "0.0.0"
 dependencies = [
  "conflaguration",
+]
+
+[[package]]
+name = "example-sizing"
+version = "0.0.0"
+dependencies = [
+ "conflaguration",
+ "toml 0.8.23",
 ]
 
 [[package]]

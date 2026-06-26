@@ -1,0 +1,5 @@
+error: nested and flatten are mutually exclusive
+  --> tests/compile_fail/nested_and_flatten.rs:11:5
+   |
+11 |     inner: Inner,
+   |     ^^^^^

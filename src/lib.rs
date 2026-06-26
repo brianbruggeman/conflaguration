@@ -1,5 +1,14 @@
 //! Typed configuration from environment variables, files, and fluent builders.
 //!
+//! # Tutorial
+//!
+//! ## 1. Describe the config as a struct
+//!
+//! Derive [`Settings`] to resolve fields from the environment, and [`Validate`]
+//! to check them afterward. A struct-level `prefix` is prepended to every key.
+//! [`init`] is just `from_env()` then `validate()`, returning the first error
+//! from either — so propagate it with `?`, never `unwrap`.
+//!
 //! ```rust,ignore
 //! use conflaguration::{Settings, Validate, init};
 //!
@@ -7,64 +16,244 @@
 //! #[settings(prefix = "APP")]
 //! struct Config {
 //!     #[setting(default = 8080)]
-//!     port: u16,
+//!     port: u16,                         // reads APP_PORT
+//!
 //!     #[setting(default = "localhost")]
-//!     host: String,
+//!     host: String,                      // reads APP_HOST
 //! }
 //!
-//! let config: Config = init().unwrap();
+//! fn main() -> conflaguration::Result<()> {
+//!     let config: Config = init()?;      // from_env + validate, `?` surfaces failures
+//!     println!("listening on {}:{}", config.host, config.port);
+//!     Ok(())
+//! }
 //! ```
+//!
+//! ## 2. Handle the error instead of unwrapping
+//!
+//! [`init`] can fail two ways, and the [`Error`] enum tells you which: a bad or
+//! missing env var ([`Error::Env`]) or a failed validation rule
+//! ([`Error::Validation`]). Match on it to react meaningfully:
+//!
+//! ```rust,ignore
+//! use conflaguration::{Error, init};
+//!
+//! match init::<Config>() {
+//!     Ok(config) => run(config),
+//!     // a var was missing or didn't parse; env_err names the key, type, and value
+//!     Err(Error::Env(env_err)) => eprintln!("bad environment: {env_err}"),
+//!     // your validate() rules rejected fields; each carries a dotted path
+//!     Err(Error::Validation { errors }) => {
+//!         for failure in errors {
+//!             eprintln!("{}: {}", failure.path, failure.message);
+//!         }
+//!     }
+//!     Err(other) => eprintln!("config error: {other}"),
+//! }
+//! ```
+//!
+//! ## 3. Nest and flatten sub-structs
+//!
+//! Any field whose type also derives [`Settings`] becomes a sub-section. The
+//! env key is built by accumulating the parent prefix with a segment; the four
+//! forms below cover every layout. The same `Database` type is reused three
+//! times without collisions because each field supplies its own segment.
+//!
+//! ```rust,ignore
+//! use conflaguration::{Settings, Validate, init};
+//!
+//! #[derive(Settings, Validate)]
+//! struct Database {
+//!     #[setting(default = "localhost")]
+//!     host: String,
+//!     #[setting(default = 5432)]
+//!     port: u16,
+//! }
+//!
+//! #[derive(Settings, Validate)]
+//! struct Tls {
+//!     #[setting(default = false)]
+//!     enabled: bool,
+//! }
+//!
+//! #[derive(Settings, Validate)]
+//! #[settings(prefix = "APP")]
+//! struct Config {
+//!     #[setting(envs = "DATABASE_URL", override)]
+//!     url: String,                       // DATABASE_URL          (exact key, ignores prefix)
+//!
+//!     #[setting(nested)]
+//!     primary: Database,                 // APP_PRIMARY_HOST/PORT  (segment = field name)
+//!
+//!     #[setting(nested, prefix = "RO")]
+//!     replica: Database,                 // APP_RO_HOST/PORT       (segment renamed)
+//!
+//!     #[setting(nested, override_prefix = "PG")]
+//!     audit: Database,                   // PG_HOST/PORT           (absolute, ignores APP)
+//!
+//!     #[setting(flatten)]
+//!     tls: Tls,                          // APP_ENABLED            (merged, no segment)
+//! }
+//!
+//! fn main() -> conflaguration::Result<()> {
+//!     let config: Config = init()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! A sub-struct's own `#[settings(prefix = "...")]` is used only when it is
+//! resolved directly as a root; once embedded, the embedding field decides the
+//! namespace.
+//!
+//! ## 4. Layer sources with the builder
+//!
+//! [`init`] reads one source: the environment. Real deployments stack several —
+//! a checked-in base file, a per-environment overlay, and finally real env vars.
+//! The [`builder`] composes them.
+//!
+//! The first source builds the value in full; each later source provides a set
+//! of keys and combines them one of two ways:
+//!
+//! - **override** ([`file`](ConfigBuilder::file), [`mapping`](ConfigBuilder::mapping),
+//!   [`env`](ConfigBuilder::env)) — replace existing keys, insert new ones.
+//! - **overlay** ([`overlay_file`](ConfigBuilder::overlay_file),
+//!   [`overlay_mapping`](ConfigBuilder::overlay_mapping)) — insert keys the value
+//!   lacks, keep existing non-null values.
+//!
+//! So order is precedence for overrides (last wins per key); overlays fill gaps.
+//!
+//! ```rust,ignore
+//! fn main() -> conflaguration::Result<()> {
+//!     conflaguration::load()?;            // optional: pull a .env file into the process
+//!
+//!     let config: Config = conflaguration::builder()
+//!         .file("base.toml")              // base layer (full)
+//!         .file("prod.toml")              // override: prod's keys win
+//!         .overlay_mapping(fallbacks)     // overlay: fill only keys still unset
+//!         .env()                          // override: set env vars win
+//!         .validate()
+//!         .build()?;
+//!     Ok(())
+//! }
+//! ```
+//!
+//! [`value`](ConfigBuilder::value) seeds the chain from an owned `T` (the
+//! struct↔fluent flop), and [`build`](ConfigBuilder::build) hands it back.
+//! File/mapping sources require the type to also implement
+//! [`Serialize`](serde::Serialize) (the merge reads the current value back);
+//! see [`ConfigBuilder`] for the precise per-method rules.
+//!
+//! ## 5. Compile-time sizing with a build script
+//!
+//! For values that must be `const` (array sizes, capacities) but still want a
+//! runtime override surface, resolve a [`Settings`] struct at build time and
+//! bake it into constants with `#[derive(ConfigCodegen)]` plus the [`codegen`]
+//! build module. The const is the compile-time default; the same struct
+//! resolves the runtime override. See `examples/codegen` (and `examples/sizing`
+//! for the hand-rolled TOML variant).
+//!
+//! [`Settings`]: trait@Settings
+//! [`Validate`]: trait@Validate
+
+#![warn(missing_docs)]
 
 mod builder;
+pub mod template;
 
 pub use builder::ConfigBuilder;
+
+/// Trait for parsing a value from an environment-variable string. Implemented
+/// for the standard scalar types; implement it to support custom field types.
 pub use environs::FromEnvStr;
+
+/// Load a `.env` file from the default location into the process environment.
+/// Existing variables are left untouched; missing file is a no-op.
 pub use environs::load;
+/// Like [`load`] but values in the `.env` file overwrite existing variables.
 pub use environs::load_override;
+/// Like [`load_override`] but reads the `.env` file from an explicit path.
 pub use environs::load_override_path;
+/// Like [`load`] but reads the `.env` file from an explicit path.
 pub use environs::load_path;
+
+/// Resolve the first set key in `keys`, parsing it into `T`. Errors if none set.
 pub use environs::resolve;
+/// Resolve the first set key, falling back to `default` when none is set.
+/// Parse errors on a present key still propagate.
 pub use environs::resolve_or;
+/// Resolve the first set key, computing the fallback lazily when none is set.
 pub use environs::resolve_or_else;
+/// Resolve the first set key, parsing `default_str` as the fallback when none is set.
 pub use environs::resolve_or_parse;
 
+/// Derive macro: implement [`ConfigDisplay`] for a struct.
 #[cfg(feature = "derive")]
 pub use conflaguration_derive::ConfigDisplay;
+/// Derive macro: implement the [`Settings`](trait@Settings) trait for a struct.
+/// Resolves each field from the environment; see below for the attribute list.
 #[cfg(feature = "derive")]
 pub use conflaguration_derive::Settings;
+/// Derive macro: implement [`Validate`], cascading into `nested`/`flatten` fields.
 #[cfg(feature = "derive")]
 pub use conflaguration_derive::Validate;
 
+/// Derive macro: implement [`ConfigCodegen`] for a flat scalar struct.
+#[cfg(feature = "derive")]
+pub use conflaguration_derive::ConfigCodegen;
+
+/// Re-exported so generated and downstream code can name the file-loader bound.
 #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
 pub use serde::de::DeserializeOwned;
 
 #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
 mod file;
 
+/// Load and deserialize a config file, detecting the format by lowercase
+/// extension (`.toml`, `.json`, `.yaml`, `.yml`). Other extensions are rejected.
 #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
 pub use file::from_file;
+/// Load from a file, then overlay environment variables on top.
 #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
 pub use file::from_file_then_env;
+/// Load from a file, overlay env, then apply a final mutation (e.g. CLI flags).
 #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
 pub use file::from_file_then_env_then;
+/// Deserialize a config value from a JSON string.
 #[cfg(feature = "json")]
 pub use file::from_json_str;
+/// Deserialize a config value from a TOML string.
 #[cfg(feature = "toml")]
 pub use file::from_toml_str;
+/// Deserialize a config value from a YAML string.
 #[cfg(feature = "yaml")]
 pub use file::from_yaml_str;
 
 /// Crate-level result type.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Join an accumulated prefix with a key segment. Empty prefix yields the bare
+/// segment so root structs without a prefix produce clean keys.
+#[doc(hidden)]
+#[must_use]
+pub fn join_key(prefix: &str, segment: &str) -> String {
+    if prefix.is_empty() {
+        segment.to_owned()
+    } else {
+        format!("{prefix}_{segment}")
+    }
+}
+
 /// A single validation failure, keyed by dotted field path.
 #[derive(Debug, Clone)]
 pub struct ValidationMessage {
+    /// Dotted path to the offending field, e.g. `database.host`.
     pub path: String,
+    /// Human-readable failure reason.
     pub message: String,
 }
 
 impl ValidationMessage {
+    /// Build a message for `path` with the given failure `message`.
     pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
         Self {
             path: path.into(),
@@ -72,6 +261,8 @@ impl ValidationMessage {
         }
     }
 
+    /// Prepend a parent segment to the path, building the dotted chain as
+    /// errors bubble up through nested structs.
     pub fn prepend_path(&mut self, prefix: &str) {
         if self.path.is_empty() {
             self.path = prefix.to_string();
@@ -95,29 +286,40 @@ impl std::fmt::Display for ValidationMessage {
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// Environment lookup or parse failure from the `environs` layer.
     #[error(transparent)]
     Env(#[from] environs::Error),
 
+    /// One or more fields failed validation.
     #[error("validation failed:\n{}", errors.iter().map(|err| format!("  - {err}")).collect::<Vec<_>>().join("\n"))]
-    Validation { errors: Vec<ValidationMessage> },
+    Validation {
+        /// The collected per-field failures.
+        errors: Vec<ValidationMessage>,
+    },
 
+    /// Reading a config file from disk failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// File extension did not match a supported format.
     #[error("unsupported config format: {0}")]
     UnsupportedFormat(String),
 
+    /// The builder was finalized without any source configured.
     #[error("no config source provided to builder")]
     NoSource,
 
+    /// TOML deserialization failed.
     #[cfg(feature = "toml")]
     #[error("toml: {0}")]
     Toml(#[from] toml::de::Error),
 
-    #[cfg(feature = "json")]
+    /// JSON (de)serialization failed, including the file-overlay merge medium.
+    #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
 
+    /// YAML deserialization failed.
     #[cfg(feature = "yaml")]
     #[error("yaml: {0}")]
     Yaml(#[from] serde_yaml::Error),
@@ -126,19 +328,32 @@ pub enum Error {
 /// Construct a typed config struct from environment variables.
 ///
 /// Derive with `#[derive(Settings)]` or implement manually.
+///
+/// Env keys are built by accumulating a prefix down the struct hierarchy. A
+/// scalar field contributes its uppercased name as the final segment; a nested
+/// field contributes its name (or chosen segment) and recurses. So a `host`
+/// field two levels deep under prefix `APP` resolves `APP_<SEGMENT>_HOST`.
 pub trait Settings: Sized {
+    /// The struct's own prefix, used only when it is the root of resolution.
+    /// When embedded as a nested field, the embedding field decides the prefix.
     const PREFIX: Option<&'static str> = None;
 
+    /// Resolve using the struct's own [`PREFIX`](Settings::PREFIX) as the root.
     fn from_env() -> Result<Self>;
 
+    /// Resolve using `prefix` as the accumulated root instead of [`PREFIX`](Settings::PREFIX).
+    /// Used by parent structs to push their namespace into nested fields.
     fn from_env_with_prefix(_prefix: &str) -> Result<Self> {
         Self::from_env()
     }
 
+    /// Overwrite only the fields whose env keys are currently set, leaving the
+    /// rest untouched. Useful for layering env over file-loaded defaults.
     fn override_from_env(&mut self) -> Result<()> {
         Ok(())
     }
 
+    /// [`override_from_env`](Settings::override_from_env) with an explicit accumulated prefix.
     fn override_from_env_with_prefix(&mut self, _prefix: &str) -> Result<()> {
         Ok(())
     }
@@ -146,9 +361,11 @@ pub trait Settings: Sized {
 
 /// Validate a config struct after construction.
 ///
-/// Derive with `#[derive(Validate)]` to cascade into nested fields,
-/// or implement manually for custom rules.
+/// Derive with `#[derive(Validate)]` to cascade into `nested` and `flatten`
+/// fields, or implement manually for custom rules.
 pub trait Validate {
+    /// Check the constructed config, returning [`Error::Validation`] with every
+    /// failure collected, or `Ok(())` when all rules pass.
     fn validate(&self) -> Result<()>;
 }
 
@@ -210,16 +427,42 @@ where
     })
 }
 
+/// Emit a resolved config as build-time artifacts — compile-time `const`s and
+/// `cargo:rustc-cfg` directives — for the two-tier "build-time default const +
+/// runtime override" pattern (see the [`codegen`] module).
+///
+/// Derive with `#[derive(ConfigCodegen)]` on a flat struct of scalar fields.
+pub trait ConfigCodegen {
+    /// Render the value as a `pub const` module (with a do-not-edit header),
+    /// suitable to write into `OUT_DIR` and `include!` from the crate.
+    fn to_const_module(&self) -> String;
+
+    /// Print `cargo:rustc-cfg=<prefix>_<field>` directives: a bare flag for each
+    /// `true` bool, a `="value"` form for everything else.
+    fn emit_cfg(&self, prefix: &str);
+
+    /// The environment keys this config reads, for `rerun-if-env-changed`.
+    fn env_keys() -> Vec<String>
+    where
+        Self: Sized;
+}
+
 /// Render config fields with their env var keys for debugging/logging.
 ///
 /// Derive with `#[derive(ConfigDisplay)]` for automatic implementation.
 pub trait ConfigDisplay {
+    /// Write each field at the given indentation `depth`, using the struct's
+    /// own prefix for the displayed env keys.
     fn fmt_config(&self, formatter: &mut std::fmt::Formatter<'_>, depth: usize) -> std::fmt::Result;
 
+    /// Like [`fmt_config`](ConfigDisplay::fmt_config) but with an explicit
+    /// accumulated `prefix` for the displayed keys.
     fn fmt_config_with_prefix(&self, formatter: &mut std::fmt::Formatter<'_>, depth: usize, _prefix: &str) -> std::fmt::Result {
         self.fmt_config(formatter, depth)
     }
 
+    /// Wrap `self` in a [`Display`](std::fmt::Display) adapter that renders the
+    /// config with its env keys.
     fn display(&self) -> ConfigView<'_, Self>
     where
         Self: Sized,
@@ -227,6 +470,8 @@ pub trait ConfigDisplay {
         ConfigView(self)
     }
 
+    /// Like [`display`](ConfigDisplay::display) but renders keys under a runtime
+    /// `prefix` instead of the struct's static one.
     fn display_with_prefix<'a>(&'a self, prefix: &'a str) -> ConfigPrefixView<'a, Self>
     where
         Self: Sized,
@@ -235,6 +480,7 @@ pub trait ConfigDisplay {
     }
 }
 
+/// [`Display`](std::fmt::Display) adapter returned by [`ConfigDisplay::display`].
 pub struct ConfigView<'a, T: ConfigDisplay + ?Sized>(&'a T);
 
 impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigView<'_, T> {
@@ -243,6 +489,8 @@ impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigView<'_, T> {
     }
 }
 
+/// [`Display`](std::fmt::Display) adapter returned by
+/// [`ConfigDisplay::display_with_prefix`], rendering keys under a runtime prefix.
 pub struct ConfigPrefixView<'a, T: ConfigDisplay + ?Sized> {
     inner: &'a T,
     prefix: &'a str,
@@ -251,6 +499,66 @@ pub struct ConfigPrefixView<'a, T: ConfigDisplay + ?Sized> {
 impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigPrefixView<'_, T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.inner.fmt_config_with_prefix(formatter, 0, self.prefix)
+    }
+}
+
+/// Build-script helpers for the two-tier pattern: resolve a config at build time,
+/// bake it into compile-time constants, and emit the cargo directives that keep
+/// the generated file fresh. Pair with `#[derive(ConfigCodegen)]`.
+///
+/// ```rust,ignore
+/// // build.rs
+/// use conflaguration::{Settings, codegen};
+///
+/// #[derive(Settings, conflaguration::ConfigCodegen)]
+/// #[settings(prefix = "APP")]
+/// struct Build {
+///     #[setting(default = 8)]
+///     pool_threads: u32,
+/// }
+///
+/// fn main() -> conflaguration::Result<()> {
+///     let build = Build::from_env()?;               // defaults + APP_* at build time
+///     codegen::write_consts(&build, "build_config.rs")?;
+///     build.emit_cfg("app");                         // cargo:rustc-cfg=app_* directives
+///     codegen::rerun_for::<Build>();                 // rerun when APP_* change
+///     Ok(())
+/// }
+/// ```
+#[cfg(feature = "codegen")]
+pub mod codegen {
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    use crate::ConfigCodegen;
+
+    /// Write `value`'s [`to_const_module`](ConfigCodegen::to_const_module) output
+    /// to `OUT_DIR/<file_name>`, returning the path written. Call from `build.rs`.
+    pub fn write_consts<T: ConfigCodegen>(value: &T, file_name: &str) -> std::io::Result<PathBuf> {
+        let out_dir = std::env::var_os("OUT_DIR").ok_or_else(|| std::io::Error::other("OUT_DIR not set (call from a build script)"))?;
+        let path = Path::new(&out_dir).join(file_name);
+        std::fs::write(&path, value.to_const_module())?;
+        Ok(path)
+    }
+
+    /// Emit `cargo:rerun-if-changed` for a path the build depends on.
+    pub fn rerun_if_changed(path: impl AsRef<Path>) {
+        println!("cargo:rerun-if-changed={}", path.as_ref().display());
+    }
+
+    /// Emit `cargo:rerun-if-env-changed` for each key.
+    pub fn rerun_if_env_changed(keys: &[&str]) {
+        for key in keys {
+            println!("cargo:rerun-if-env-changed={key}");
+        }
+    }
+
+    /// Emit `cargo:rerun-if-env-changed` for every env key `T` reads, derived
+    /// from its [`Settings`](crate::Settings) attributes — no hand-kept list.
+    pub fn rerun_for<T: ConfigCodegen>() {
+        for key in T::env_keys() {
+            println!("cargo:rerun-if-env-changed={key}");
+        }
     }
 }
 

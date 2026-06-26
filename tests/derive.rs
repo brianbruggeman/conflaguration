@@ -179,7 +179,7 @@ struct OuterConfig {
 
 #[test]
 fn nested_settings() {
-    temp_env::with_vars([("CONFLAG_OUTER_PORT", None::<&str>), ("CONFLAG_INNER_URL", Some("redis://remote:6379"))], || {
+    temp_env::with_vars([("CONFLAG_OUTER_PORT", None::<&str>), ("CONFLAG_OUTER_INNER_URL", Some("redis://remote:6379"))], || {
         let config = OuterConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         assert_eq!(config.port, 8080);
         assert_eq!(config.inner.url, "redis://remote:6379");
@@ -371,16 +371,16 @@ struct AccumOuter {
     #[setting(default = 1)]
     count: i32,
 
-    #[setting(nested, override_prefix)]
+    #[setting(nested)]
     inner: AccumInner,
 }
 
 #[test]
-fn override_prefix_bare_accumulates() {
+fn nested_accumulates_parent_prefix_and_field_name() {
     temp_env::with_vars(
         [
             ("ACCUM_OUTER_COUNT", None::<&str>),
-            ("ACCUM_OUTER_ACCUM_INNER_VALUE", Some("accumulated")),
+            ("ACCUM_OUTER_INNER_VALUE", Some("accumulated")),
             ("ACCUM_INNER_VALUE", None::<&str>),
         ],
         || {
@@ -392,18 +392,49 @@ fn override_prefix_bare_accumulates() {
 }
 
 #[test]
-fn override_prefix_bare_falls_back_to_default() {
-    temp_env::with_vars(
-        [
-            ("ACCUM_OUTER_COUNT", None::<&str>),
-            ("ACCUM_OUTER_ACCUM_INNER_VALUE", None::<&str>),
-            ("ACCUM_INNER_VALUE", None::<&str>),
-        ],
-        || {
-            let config = AccumOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
-            assert_eq!(config.inner.value, "default_val");
-        },
-    );
+fn nested_ignores_inner_struct_own_prefix() {
+    temp_env::with_vars([("ACCUM_OUTER_INNER_VALUE", None::<&str>), ("ACCUM_INNER_VALUE", Some("ignored"))], || {
+        let config = AccumOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert_eq!(config.inner.value, "default_val");
+    });
+}
+
+#[test]
+fn nested_falls_back_to_default() {
+    temp_env::with_vars([("ACCUM_OUTER_INNER_VALUE", None::<&str>), ("ACCUM_INNER_VALUE", None::<&str>)], || {
+        let config = AccumOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert_eq!(config.inner.value, "default_val");
+    });
+}
+
+#[derive(Settings)]
+#[settings(prefix = "SEG_OUTER")]
+struct SegmentPrefixOuter {
+    #[setting(nested, prefix = "DB")]
+    inner: AccumInner,
+}
+
+#[test]
+fn nested_prefix_renames_the_segment() {
+    temp_env::with_vars([("SEG_OUTER_DB_VALUE", Some("renamed")), ("SEG_OUTER_INNER_VALUE", None::<&str>)], || {
+        let config = SegmentPrefixOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert_eq!(config.inner.value, "renamed");
+    });
+}
+
+#[derive(Settings)]
+#[settings(prefix = "FLAT_OUTER")]
+struct FlattenOuter {
+    #[setting(flatten)]
+    inner: AccumInner,
+}
+
+#[test]
+fn flatten_merges_into_parent_namespace() {
+    temp_env::with_vars([("FLAT_OUTER_VALUE", Some("merged")), ("ACCUM_INNER_VALUE", None::<&str>)], || {
+        let config = FlattenOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert_eq!(config.inner.value, "merged");
+    });
 }
 
 #[derive(Settings)]
@@ -414,19 +445,34 @@ struct ExplicitPrefixOuter {
 }
 
 #[test]
-fn override_prefix_explicit_uses_given_prefix() {
-    temp_env::with_vars([("CUSTOM_NS_VALUE", Some("explicit_override")), ("ACCUM_INNER_VALUE", None::<&str>)], || {
-        let config = ExplicitPrefixOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
-        assert_eq!(config.inner.value, "explicit_override");
+fn override_prefix_explicit_uses_absolute_prefix() {
+    temp_env::with_vars(
+        [
+            ("CUSTOM_NS_VALUE", Some("explicit_override")),
+            ("EXPLICIT_OUTER_CUSTOM_NS_VALUE", None::<&str>),
+            ("ACCUM_INNER_VALUE", None::<&str>),
+        ],
+        || {
+            let config = ExplicitPrefixOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+            assert_eq!(config.inner.value, "explicit_override");
+        },
+    );
+}
+
+#[test]
+fn from_env_with_prefix_propagates_to_nested() {
+    temp_env::with_vars([("RUNTIME_COUNT", Some("99")), ("RUNTIME_INNER_VALUE", Some("runtime_accumulated"))], || {
+        let config = AccumOuter::from_env_with_prefix("RUNTIME").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
+        assert_eq!(config.count, 99);
+        assert_eq!(config.inner.value, "runtime_accumulated");
     });
 }
 
 #[test]
-fn from_env_with_prefix_propagates_to_override_prefix() {
-    temp_env::with_vars([("RUNTIME_COUNT", Some("99")), ("RUNTIME_ACCUM_INNER_VALUE", Some("runtime_accumulated"))], || {
-        let config = AccumOuter::from_env_with_prefix("RUNTIME").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
-        assert_eq!(config.count, 99);
-        assert_eq!(config.inner.value, "runtime_accumulated");
+fn from_env_with_prefix_does_not_affect_absolute_override_prefix() {
+    temp_env::with_vars([("CUSTOM_NS_VALUE", Some("absolute")), ("RUNTIME_CUSTOM_NS_VALUE", None::<&str>)], || {
+        let config = ExplicitPrefixOuter::from_env_with_prefix("RUNTIME").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
+        assert_eq!(config.inner.value, "absolute");
     });
 }
 
@@ -475,7 +521,7 @@ struct CascadeOuterConfig {
 
 #[test]
 fn derived_validate_cascades_to_nested() {
-    temp_env::with_vars([("CASCVAL_OUTER_DEBUG", None::<&str>), ("CASCVAL_INNER_PORT", Some("0"))], || {
+    temp_env::with_vars([("CASCVAL_OUTER_DEBUG", None::<&str>), ("CASCVAL_OUTER_INNER_PORT", Some("0"))], || {
         let config = CascadeOuterConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         let err = match config.validate() {
             Err(err) => err,
@@ -488,7 +534,7 @@ fn derived_validate_cascades_to_nested() {
 
 #[test]
 fn derived_validate_cascade_passes_when_valid() {
-    temp_env::with_vars([("CASCVAL_OUTER_DEBUG", None::<&str>), ("CASCVAL_INNER_PORT", Some("8080"))], || {
+    temp_env::with_vars([("CASCVAL_OUTER_DEBUG", None::<&str>), ("CASCVAL_OUTER_INNER_PORT", Some("8080"))], || {
         let config = CascadeOuterConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         assert!(config.validate().is_ok());
     });
@@ -525,7 +571,7 @@ struct MultiCascadeConfig {
 
 #[test]
 fn derived_validate_collects_errors_from_multiple_nested() {
-    temp_env::with_vars([("CASCVAL_INNER_PORT", Some("0")), ("CASCVAL_SECOND_NAME", Some(""))], || {
+    temp_env::with_vars([("CASCVAL_MULTI_FIRST_PORT", Some("0")), ("CASCVAL_MULTI_SECOND_NAME", Some(""))], || {
         let config = MultiCascadeConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         let err = match config.validate() {
             Err(err) => err,
@@ -572,7 +618,7 @@ struct DeepLevel1 {
 
 #[test]
 fn derived_validate_deep_nesting_builds_path() {
-    temp_env::with_vars([("DEEP_L3_VALUE", Some("0"))], || {
+    temp_env::with_vars([("DEEP_L1_LEVEL2_LEVEL3_VALUE", Some("0"))], || {
         let config = DeepLevel1::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         let err = match config.validate() {
             Err(err) => err,
@@ -685,12 +731,12 @@ struct DisplayOuter {
 
 #[test]
 fn config_display_nested_indents() {
-    temp_env::with_vars([("DISP_OUTER_PORT", None::<&str>), ("DISP_INNER_URL", None::<&str>)], || {
+    temp_env::with_vars([("DISP_OUTER_PORT", None::<&str>), ("DISP_OUTER_INNER_URL", None::<&str>)], || {
         let config = DisplayOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         let output = format!("{}", config);
         assert!(output.contains("port = 8080 (DISP_OUTER_PORT)"));
         assert!(output.contains("inner:"));
-        assert!(output.contains("  url = \"redis://localhost\" (DISP_INNER_URL)"));
+        assert!(output.contains("  url = \"redis://localhost\" (DISP_OUTER_INNER_URL)"));
     });
 }
 
@@ -847,7 +893,7 @@ struct OverrideNestedOuter {
 
 #[test]
 fn override_from_env_recurses_into_nested() {
-    temp_env::with_vars([("OVR_NEST_OUTER_PORT", None::<&str>), ("OVR_NEST_INNER_URL", Some("redis://env:6379"))], || {
+    temp_env::with_vars([("OVR_NEST_OUTER_PORT", None::<&str>), ("OVR_NEST_OUTER_INNER_URL", Some("redis://env:6379"))], || {
         let mut config = OverrideNestedOuter {
             port: 3000,
             inner: OverrideNestedInner { url: "redis://file:6379".into() },
@@ -971,13 +1017,13 @@ fn config_display_with_dynamic_prefix_shows_runtime_keys() {
 }
 
 #[test]
-fn config_display_with_dynamic_prefix_on_nested_without_override_prefix() {
-    temp_env::with_vars([("RT_PORT", Some("5555")), ("DISP_INNER_URL", Some("redis://rt"))], || {
+fn config_display_nested_accumulates_runtime_prefix() {
+    temp_env::with_vars([("RT_PORT", Some("5555")), ("RT_INNER_URL", Some("redis://rt"))], || {
         let config = DisplayOuter::from_env_with_prefix("RT").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
         let output = format!("{}", config.display_with_prefix("RT"));
         assert!(output.contains("port = 5555 (RT_PORT)"), "got: {output}");
         assert!(output.contains("inner:"), "got: {output}");
-        assert!(output.contains("DISP_INNER_URL"), "nested without override_prefix uses static keys, got: {output}");
+        assert!(output.contains("RT_INNER_URL"), "nested accumulates runtime prefix and field name, got: {output}");
     });
 }
 
@@ -994,18 +1040,18 @@ struct DynPrefixOuter {
     #[setting(default = 8080)]
     port: u16,
 
-    #[setting(nested, override_prefix)]
+    #[setting(nested, prefix = "SUB")]
     inner: DynPrefixInner,
 }
 
 #[test]
-fn config_display_with_dynamic_prefix_on_override_prefix_nested() {
-    temp_env::with_vars([("RT_PORT", Some("5555")), ("RT_DPFX_INNER_URL", Some("redis://rt"))], || {
+fn config_display_nested_prefix_segment_accumulates_runtime_prefix() {
+    temp_env::with_vars([("RT_PORT", Some("5555")), ("RT_SUB_URL", Some("redis://rt"))], || {
         let config = DynPrefixOuter::from_env_with_prefix("RT").unwrap_or_else(|err| panic!("from_env_with_prefix failed: {err}"));
         let output = format!("{}", config.display_with_prefix("RT"));
         assert!(output.contains("port = 5555 (RT_PORT)"), "got: {output}");
         assert!(output.contains("inner:"), "got: {output}");
-        assert!(output.contains("RT_DPFX_INNER_URL"), "nested with override_prefix should accumulate runtime prefix, got: {output}");
+        assert!(output.contains("RT_SUB_URL"), "nested prefix segment accumulates runtime prefix, got: {output}");
     });
 }
 
@@ -1624,7 +1670,7 @@ fn builder_with_resolve_with_env_happy() {
 fn builder_with_resolve_with_defaults_then_env() {
     temp_env::with_vars([("BUILD_RW_TAGS", Some("x,y")), ("BUILD_RW_PORT", None::<&str>)], || {
         let config: BuilderResolveWithConfig = conflaguration::builder()
-            .defaults()
+            .value(BuilderResolveWithConfig::default())
             .env()
             .build()
             .unwrap_or_else(|err| panic!("build failed: {err}"));
@@ -1869,7 +1915,7 @@ fn resolve_with_custom_struct_override_replaces() {
 #[test]
 fn builder_with_resolve_with_validate_sad() {
     temp_env::with_vars([("BUILD_RW_TAGS", None::<&str>), ("BUILD_RW_PORT", None::<&str>)], || {
-        let result: conflaguration::Result<BuilderResolveWithConfig> = conflaguration::builder().defaults().validate().build();
+        let result: conflaguration::Result<BuilderResolveWithConfig> = conflaguration::builder().value(BuilderResolveWithConfig::default()).validate().build();
         assert!(matches!(result, Err(conflaguration::Error::Validation { .. })));
     });
 }
@@ -2041,17 +2087,17 @@ struct NestedErrorOuter {
 
 #[test]
 fn nested_parse_error_surfaces_while_sibling_is_valid() {
-    temp_env::with_vars([("NEST_ERR_OUTER_NAME", Some("fine")), ("NEST_ERR_INNER_PORT", Some("banana"))], || {
+    temp_env::with_vars([("NEST_ERR_OUTER_NAME", Some("fine")), ("NEST_ERR_OUTER_INNER_PORT", Some("banana"))], || {
         let result = NestedErrorOuter::from_env();
         assert!(result.is_err());
         let msg = result.unwrap_err().to_string();
-        assert!(msg.contains("NEST_ERR_INNER_PORT"), "error should identify the nested field's key, got: {msg}");
+        assert!(msg.contains("NEST_ERR_OUTER_INNER_PORT"), "error should identify the nested field's key, got: {msg}");
     });
 }
 
 #[test]
 fn nested_missing_required_field_errors() {
-    temp_env::with_vars([("NEST_ERR_OUTER_NAME", Some("fine")), ("NEST_ERR_INNER_PORT", None::<&str>)], || {
+    temp_env::with_vars([("NEST_ERR_OUTER_NAME", Some("fine")), ("NEST_ERR_OUTER_INNER_PORT", None::<&str>)], || {
         let result = NestedErrorOuter::from_env();
         assert!(result.is_err());
     });
@@ -2059,7 +2105,7 @@ fn nested_missing_required_field_errors() {
 
 #[test]
 fn nested_all_valid_succeeds() {
-    temp_env::with_vars([("NEST_ERR_OUTER_NAME", Some("hello")), ("NEST_ERR_INNER_PORT", Some("5432"))], || {
+    temp_env::with_vars([("NEST_ERR_OUTER_NAME", Some("hello")), ("NEST_ERR_OUTER_INNER_PORT", Some("5432"))], || {
         let config = NestedErrorOuter::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         assert_eq!(config.name, "hello");
         assert_eq!(config.inner.port, 5432);

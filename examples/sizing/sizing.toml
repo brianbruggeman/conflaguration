@@ -1,0 +1,5 @@
+[ring]
+capacity = 1024
+
+[pump]
+flush_interval_micros = 500

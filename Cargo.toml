@@ -4,7 +4,7 @@ members = [".", "crates/*", "examples/*"]
 
 [package]
 name = "conflaguration"
-version = "1.2.0"
+version = "2.0.0"
 edition = "2024"
 description = "typed settings structs from environment variables"
 license = "MIT"
@@ -15,11 +15,12 @@ categories = ["config"]
 [dependencies]
 environs = "1.2.0"
 thiserror = "2"
-conflaguration-derive = { version = "1.1.0", path = "crates/conflaguration-derive", optional = true }
+conflaguration-derive = { version = "2.0.0", path = "crates/conflaguration-derive", optional = true }
 serde = { version = "1", optional = true }
 toml = { version = "0.8", optional = true }
 serde_json = { version = "1", optional = true }
 serde_yaml = { version = "0.9", optional = true }
+memchr = "2.8.0"
 
 [lints.rust]
 warnings = "deny"
@@ -36,6 +37,9 @@ trybuild = "1.0.116"
 
 [features]
 derive = ["dep:conflaguration-derive"]
-toml = ["dep:serde", "dep:toml"]
+# build-script helpers (codegen module); pair with #[derive(ConfigCodegen)].
+codegen = []
+# serde_json is the merge medium for layered file overlay (ConfigBuilder::file).
+toml = ["dep:serde", "dep:toml", "dep:serde_json"]
 json = ["dep:serde", "dep:serde_json"]
-yaml = ["dep:serde", "dep:serde_yaml"]
+yaml = ["dep:serde", "dep:serde_yaml", "dep:serde_json"]
