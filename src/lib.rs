@@ -314,10 +314,20 @@ pub enum Error {
     #[error("toml: {0}")]
     Toml(#[from] toml::de::Error),
 
-    /// JSON (de)serialization failed, including the file-overlay merge medium.
-    #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+    /// JSON deserialization failed.
+    #[cfg(feature = "json")]
     #[error("json: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// Serializing a config into the file-overlay merge medium failed.
+    #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+    #[error("value serialize: {0}")]
+    ValueSerialize(#[from] serde_value::SerializerError),
+
+    /// Deserializing a config back out of the file-overlay merge medium failed.
+    #[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+    #[error("value deserialize: {0}")]
+    ValueDeserialize(#[from] serde_value::DeserializerError),
 
     /// YAML deserialization failed.
     #[cfg(feature = "yaml")]

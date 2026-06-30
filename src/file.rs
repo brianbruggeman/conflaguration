@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use serde_value::Value;
+
 use crate::Result;
 use crate::Settings;
 
@@ -50,9 +52,9 @@ pub fn from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     }
 }
 
-// parse a config file into a generic json value, the medium used to overlay
+// parse a config file into a format-neutral value, the medium used to overlay
 // one file's present keys onto an already-constructed config.
-fn file_to_value(path: &Path) -> Result<serde_json::Value> {
+fn file_to_value(path: &Path) -> Result<Value> {
     let contents = std::fs::read_to_string(path)?;
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
 
@@ -88,20 +90,26 @@ pub(crate) enum MergeMode {
     Overlay,
 }
 
-// deep-merge `incoming` onto `base` per `mode`. Objects recurse; a key absent
-// from base is always inserted; a present non-null scalar is replaced only under
+// the serde data model splits "absent" two ways: `()` from a fresh slot and a
+// serialized `Option::None`. both count as empty for overlay purposes.
+fn is_empty(value: &Value) -> bool {
+    matches!(value, Value::Unit | Value::Option(None))
+}
+
+// deep-merge `incoming` onto `base` per `mode`. Maps recurse; a key absent
+// from base is always inserted; a present non-empty scalar is replaced only under
 // Override.
-fn merge_value(base: &mut serde_json::Value, incoming: serde_json::Value, mode: MergeMode) {
+fn merge_value(base: &mut Value, incoming: Value, mode: MergeMode) {
     match (base, incoming) {
-        (serde_json::Value::Object(base_map), serde_json::Value::Object(incoming_map)) => {
+        (Value::Map(base_map), Value::Map(incoming_map)) => {
             for (key, value) in incoming_map {
-                merge_value(base_map.entry(key).or_insert(serde_json::Value::Null), value, mode);
+                merge_value(base_map.entry(key).or_insert(Value::Unit), value, mode);
             }
         }
         (base_slot, incoming) => match mode {
             MergeMode::Override => *base_slot = incoming,
             MergeMode::Overlay => {
-                if base_slot.is_null() {
+                if is_empty(base_slot) {
                     *base_slot = incoming;
                 }
             }
@@ -115,8 +123,8 @@ where
     T: serde::de::DeserializeOwned,
     M: serde::Serialize,
 {
-    let value = serde_json::to_value(incoming)?;
-    Ok(serde_json::from_value(value)?)
+    let value = serde_value::to_value(incoming)?;
+    Ok(T::deserialize(value)?)
 }
 
 /// Combine a config file's keys with an existing value per `mode`.
@@ -124,10 +132,10 @@ pub(crate) fn merge_file<T>(base: &T, path: &Path, mode: MergeMode) -> Result<T>
 where
     T: serde::Serialize + serde::de::DeserializeOwned,
 {
-    let mut base_value = serde_json::to_value(base)?;
+    let mut base_value = serde_value::to_value(base)?;
     let file_value = file_to_value(path)?;
     merge_value(&mut base_value, file_value, mode);
-    Ok(serde_json::from_value(base_value)?)
+    Ok(T::deserialize(base_value)?)
 }
 
 /// Combine an in-memory mapping's keys with an existing value per `mode`.
@@ -136,10 +144,10 @@ where
     T: serde::Serialize + serde::de::DeserializeOwned,
     M: serde::Serialize,
 {
-    let mut base_value = serde_json::to_value(base)?;
-    let incoming_value = serde_json::to_value(incoming)?;
+    let mut base_value = serde_value::to_value(base)?;
+    let incoming_value = serde_value::to_value(incoming)?;
     merge_value(&mut base_value, incoming_value, mode);
-    Ok(serde_json::from_value(base_value)?)
+    Ok(T::deserialize(base_value)?)
 }
 
 /// Load from file, then override with environment variables.
