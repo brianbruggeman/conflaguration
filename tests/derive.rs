@@ -1,5 +1,6 @@
 #![cfg(feature = "derive")]
 #![allow(dead_code)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use conflaguration::ConfigDisplay;
 use conflaguration::Settings;

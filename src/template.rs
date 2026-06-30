@@ -203,6 +203,8 @@ fn find_closing(input: &[u8], start: usize) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     struct FixedResolver(&'static [u8]);

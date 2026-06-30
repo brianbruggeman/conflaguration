@@ -819,6 +819,8 @@ fn derive_config_codegen_impl(input: TokenStream2) -> syn::Result<TokenStream2> 
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
     use super::*;
 
     #[test]
