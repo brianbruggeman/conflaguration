@@ -1,0 +1,15 @@
+[package]
+name = "conflaguration-core"
+version = "0.1.0"
+edition = "2024"
+
+[dev-dependencies]
+conflaguration = { path = "../..", features = ["derive", "json"] }
+conflaguration-derive = { path = "../conflaguration-derive" }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.152"
+temp-env = "0.3.6"
+tempfile = "3.25.0"
+
+[features]
+alloc = []

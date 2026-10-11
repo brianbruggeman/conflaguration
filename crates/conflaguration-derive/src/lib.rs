@@ -6,9 +6,12 @@ use syn::DeriveInput;
 use syn::Fields;
 use syn::Lit;
 use syn::Meta;
+use syn::Path;
 use syn::Token;
+use syn::Type;
 use syn::parse::Parse;
 use syn::parse::ParseStream;
+use syn::parse_quote;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 
@@ -34,7 +37,7 @@ use syn::spanned::Spanned;
 ///
 /// # Example
 ///
-/// ```rust,ignore
+/// ```rust
 /// use conflaguration::{Settings, Validate, init};
 ///
 /// #[derive(Settings, Validate)]
@@ -46,28 +49,35 @@ use syn::spanned::Spanned;
 /// }
 ///
 /// #[derive(Settings, Validate)]
-/// #[settings(prefix = "APP")]
+/// #[settings(prefix = "CONFLAGURATION_DERIVE_TUTORIAL")]
 /// struct Config {
 ///     #[setting(default = 8080)]
-///     port: u16,                         // APP_PORT
+///     port: u16,                         // CONFLAGURATION_DERIVE_TUTORIAL_PORT
 ///
-///     #[setting(envs = "DATABASE_URL", override)]
-///     url: String,                       // DATABASE_URL  (exact key, ignores prefix)
+///     #[setting(envs = "CONFLAGURATION_DERIVE_TUTORIAL_DATABASE_URL", override)]
+///     url: String,                       // exact key, ignores prefix
 ///
 ///     #[setting(nested)]
-///     primary: Database,                 // APP_PRIMARY_HOST, APP_PRIMARY_PORT
+///     primary: Database,                 // CONFLAGURATION_DERIVE_TUTORIAL_PRIMARY_HOST, ..._PORT
 ///
 ///     #[setting(nested, prefix = "RO")]
-///     replica: Database,                 // APP_RO_HOST, APP_RO_PORT
+///     replica: Database,                 // CONFLAGURATION_DERIVE_TUTORIAL_RO_HOST, ..._PORT
 ///
-///     #[setting(nested, override_prefix = "PG")]
-///     audit: Database,                   // PG_HOST, PG_PORT  (absolute)
+///     #[setting(nested, override_prefix = "CONFLAGURATION_DERIVE_TUTORIAL_PG")]
+///     audit: Database,                   // CONFLAGURATION_DERIVE_TUTORIAL_PG_HOST, ..._PORT  (absolute)
 /// }
 ///
-/// fn main() -> conflaguration::Result<()> {
-///     let config: Config = init()?;
-///     Ok(())
-/// }
+/// unsafe { std::env::set_var("CONFLAGURATION_DERIVE_TUTORIAL_DATABASE_URL", "postgres://tutorial") };
+///
+/// let config: Config = init()?;
+/// assert_eq!(config.port, 8080);
+/// assert_eq!(config.url, "postgres://tutorial");
+/// assert_eq!(config.primary.host, "localhost");
+/// assert_eq!(config.replica.host, "localhost");
+/// assert_eq!(config.audit.host, "localhost");
+///
+/// # unsafe { std::env::remove_var("CONFLAGURATION_DERIVE_TUTORIAL_DATABASE_URL") };
+/// # Ok::<(), conflaguration::Error>(())
 /// ```
 #[proc_macro_derive(Settings, attributes(settings, setting))]
 pub fn derive_settings(input: TokenStream) -> TokenStream {
@@ -75,6 +85,98 @@ pub fn derive_settings(input: TokenStream) -> TokenStream {
         Ok(tokens) => tokens.into(),
         Err(err) => err.to_compile_error().into(),
     }
+}
+
+/// Derive borrowed, no_std settings resolution from a `SettingsSource`.
+///
+/// The struct has one lifetime parameter. Scalar fields use `FromStr`; borrowed
+/// string fields use `&'source str` and retain the source value directly.
+/// Generated paths use `::conflaguration`; the leaf can override that with
+/// `#[borrowed_settings(crate = conflaguration_core)]` until it is reexported.
+#[proc_macro_derive(BorrowedSettings, attributes(borrowed_settings))]
+pub fn derive_borrowed_settings(input: TokenStream) -> TokenStream {
+    match derive_borrowed_settings_impl(input.into()) {
+        Ok(tokens) => tokens.into(),
+        Err(err) => err.to_compile_error().into(),
+    }
+}
+
+fn derive_borrowed_settings_impl(input: TokenStream2) -> syn::Result<TokenStream2> {
+    let input: DeriveInput = syn::parse2(input)?;
+    let mut helper_path: Path = parse_quote!(::conflaguration);
+    for attribute in &input.attrs {
+        if attribute.path().is_ident("borrowed_settings") {
+            attribute.parse_nested_meta(|metadata| {
+                if metadata.path.is_ident("crate") {
+                    helper_path = metadata.value()?.parse()?;
+                    Ok(())
+                } else {
+                    Err(metadata.error("expected crate = path"))
+                }
+            })?;
+        }
+    }
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(named) => &named.named,
+            _ => return Err(syn::Error::new(input.ident.span(), "borrowed settings require named fields")),
+        },
+        _ => return Err(syn::Error::new(input.ident.span(), "borrowed settings require a struct")),
+    };
+    let mut lifetimes = input.generics.lifetimes();
+    let source_lifetime = lifetimes
+        .next()
+        .ok_or_else(|| syn::Error::new(input.ident.span(), "borrowed settings require one lifetime parameter"))?
+        .lifetime
+        .clone();
+    if lifetimes.next().is_some() {
+        return Err(syn::Error::new(input.ident.span(), "borrowed settings require one lifetime parameter"));
+    }
+
+    let mut resolved_fields = Vec::with_capacity(fields.len());
+    for field in fields {
+        let field_name = field
+            .ident
+            .as_ref()
+            .ok_or_else(|| syn::Error::new(field.span(), "borrowed settings require named fields"))?;
+        let field_key = field_name_to_env_key(&field_name.to_string());
+        let field_type = &field.ty;
+        let resolver = match field_type {
+            Type::Reference(reference) => {
+                if !matches!(&*reference.elem, Type::Path(path) if path.path.is_ident("str")) {
+                    return Err(syn::Error::new(field.span(), "borrowed fields must have type &str"));
+                }
+                quote! {
+                    #helper_path::SettingsSource::get(source, #field_key)
+                        .ok_or(#helper_path::ResolveError::Missing { field: #field_key })?
+                }
+            }
+            _ => quote! {
+                match #helper_path::SettingsSource::parse_scalar::<#field_type>(source, #field_key) {
+                    Ok(Some(value)) => value,
+                    Ok(None) => return Err(#helper_path::ResolveError::Missing { field: #field_key }),
+                    Err(_) => return Err(#helper_path::ResolveError::Invalid { field: #field_key }),
+                }
+            },
+        };
+        resolved_fields.push(quote! { #field_name: #resolver });
+    }
+
+    let struct_name = &input.ident;
+    let (impl_generics, type_generics, where_clause) = input.generics.split_for_impl();
+    Ok(quote! {
+        impl #impl_generics #helper_path::ResolveFromSource<#source_lifetime>
+            for #struct_name #type_generics #where_clause
+        {
+            fn resolve_from<Source>(source: &#source_lifetime Source)
+                -> ::core::result::Result<Self, #helper_path::ResolveError>
+            where
+                Source: #helper_path::SettingsSource + ?Sized,
+            {
+                Ok(Self { #(#resolved_fields),* })
+            }
+        }
+    })
 }
 
 /// Derive `conflaguration::Validate` to cascade validation into `nested` and
@@ -300,7 +402,10 @@ fn validate_field_attrs(field: &syn::Field, attrs: &FieldAttrs) -> syn::Result<(
         return Err(syn::Error::new(span, "skip cannot be combined with other setting attributes"));
     }
     if is_sub_settings && has_scalar_attr {
-        return Err(syn::Error::new(span, "nested and flatten cannot be combined with default, default_str, resolve_with, envs, override, or sensitive"));
+        return Err(syn::Error::new(
+            span,
+            "nested and flatten cannot be combined with default, default_str, resolve_with, envs, override, or sensitive",
+        ));
     }
     Ok(())
 }
@@ -371,22 +476,21 @@ fn gen_resolve_call(keys_expr: TokenStream2, attrs: &FieldAttrs) -> TokenStream2
 }
 
 fn field_segment_names(field_name_str: &str, attrs: &FieldAttrs) -> Vec<String> {
-    if attrs.envs.is_empty() {
-        vec![field_name_to_env_key(field_name_str)]
-    } else {
-        attrs.envs.clone()
-    }
+    if attrs.envs.is_empty() { vec![field_name_to_env_key(field_name_str)] } else { attrs.envs.clone() }
 }
 
+// key count is fixed by the attribute list at macro-expansion time, so both
+// buffers are stack arrays instead of heap-allocated Vecs.
 fn dynamic_key_tokens(field_name_str: &str, attrs: &FieldAttrs) -> (TokenStream2, TokenStream2) {
     let names = field_segment_names(field_name_str, attrs);
     let names_ref = &names;
+    let key_count = names.len();
     let keys_setup = if attrs.envs_override {
-        quote! { let __keys: ::std::vec::Vec<::std::string::String> = vec![#(#names_ref.to_string()),*]; }
+        quote! { let __keys: [::std::string::String; #key_count] = [#(#names_ref.to_string()),*]; }
     } else {
-        quote! { let __keys: ::std::vec::Vec<::std::string::String> = vec![#(::conflaguration::join_key(__prefix, #names_ref)),*]; }
+        quote! { let __keys: [::std::string::String; #key_count] = [#(::conflaguration::join_key(__prefix, #names_ref)),*]; }
     };
-    let refs_setup = quote! { let __key_refs: ::std::vec::Vec<&str> = __keys.iter().map(|s| s.as_str()).collect(); };
+    let refs_setup = quote! { let __key_refs: [&str; #key_count] = __keys.each_ref().map(|s| s.as_str()); };
     (keys_setup, refs_setup)
 }
 

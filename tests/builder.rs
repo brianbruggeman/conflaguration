@@ -1,3 +1,5 @@
+#![cfg(any(feature = "default", feature = "std"))]
+
 use conflaguration::Error;
 use conflaguration::Result;
 use conflaguration::Settings;
@@ -428,4 +430,145 @@ fn validate_on_none_state_is_noop() {
         assert_eq!(with_validate.host, without_validate.host);
         assert_eq!(with_validate.port, without_validate.port);
     });
+}
+
+// config-as-mirror (guiding principle #4): a populated, non-trivial config
+// built through every construction surface must land on the identical value.
+// `default_builder_constructs_same_as_new` above only proves two error paths
+// match; these fixtures build a real, POPULATED value through each surface
+// and assert field-for-field equality against a hand-written literal.
+
+#[cfg(feature = "derive")]
+#[derive(Debug, PartialEq, conflaguration::Settings)]
+#[cfg_attr(feature = "toml", derive(serde::Deserialize, serde::Serialize))]
+#[settings(prefix = "PARITY_DB")]
+struct ParityDatabase {
+    #[setting(default = "postgres://db.internal.example.com:5432/app")]
+    url: String,
+
+    #[setting(default = 10)]
+    pool_size: u16,
+}
+
+#[cfg(feature = "derive")]
+#[derive(Debug, PartialEq, conflaguration::Settings)]
+#[cfg_attr(feature = "toml", derive(serde::Deserialize, serde::Serialize))]
+#[settings(prefix = "PARITY")]
+struct ParityConfig {
+    #[setting(default = "api.example.com")]
+    host: String,
+
+    #[setting(default = 8443)]
+    port: u16,
+
+    #[setting(default = "https://api.example.com/webhook")]
+    webhook_url: String,
+
+    #[setting(default = true)]
+    tls_enabled: bool,
+
+    #[setting(default = 30)]
+    timeout_seconds: u32,
+
+    workers: Option<u16>,
+
+    #[setting(nested)]
+    database: ParityDatabase,
+}
+
+#[cfg(feature = "derive")]
+fn expected_parity_config() -> ParityConfig {
+    ParityConfig {
+        host: "svc.example.com".into(),
+        port: 9443,
+        webhook_url: "https://svc.example.com/hooks/deploy".into(),
+        tls_enabled: true,
+        timeout_seconds: 45,
+        workers: Some(8),
+        database: ParityDatabase {
+            url: "postgres://db.prod.example.com:5432/orders".into(),
+            pool_size: 25,
+        },
+    }
+}
+
+#[cfg(feature = "derive")]
+fn parity_env_vars() -> Vec<(&'static str, Option<&'static str>)> {
+    vec![
+        ("PARITY_HOST", Some("svc.example.com")),
+        ("PARITY_PORT", Some("9443")),
+        ("PARITY_WEBHOOK_URL", Some("https://svc.example.com/hooks/deploy")),
+        ("PARITY_TLS_ENABLED", Some("true")),
+        ("PARITY_TIMEOUT_SECONDS", Some("45")),
+        ("PARITY_WORKERS", Some("8")),
+        ("PARITY_DATABASE_URL", Some("postgres://db.prod.example.com:5432/orders")),
+        ("PARITY_DATABASE_POOL_SIZE", Some("25")),
+    ]
+}
+
+#[cfg(feature = "derive")]
+#[test]
+fn derive_from_env_and_fluent_env_and_literal_value_all_agree_field_for_field() {
+    temp_env::with_vars(parity_env_vars(), || {
+        let expected = expected_parity_config();
+
+        let from_derive: ParityConfig = ParityConfig::from_env().unwrap_or_else(|err| panic!("derive from_env failed: {err}"));
+        let from_fluent: ParityConfig = conflaguration::builder()
+            .env()
+            .build()
+            .unwrap_or_else(|err| panic!("fluent env build failed: {err}"));
+        let from_value: ParityConfig = conflaguration::builder()
+            .value(expected_parity_config())
+            .build()
+            .unwrap_or_else(|err| panic!("value build failed: {err}"));
+
+        assert_eq!(from_derive, expected, "derive from_env() must match the hand-built literal field-for-field");
+        assert_eq!(from_fluent, expected, "builder().env().build() must match the hand-built literal field-for-field");
+        assert_eq!(from_value, expected, "builder().value(literal).build() must round-trip the literal unchanged");
+    });
+}
+
+#[cfg(all(feature = "derive", feature = "toml"))]
+#[test]
+fn from_file_and_builder_file_agree_field_for_field_on_a_populated_config() {
+    let dir = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let path = dir.path().join("parity.toml");
+    std::fs::write(
+        &path,
+        r#"
+host = "file.example.com"
+port = 7443
+webhook_url = "https://file.example.com/hooks/deploy"
+tls_enabled = false
+timeout_seconds = 20
+workers = 4
+
+[database]
+url = "postgres://db.file.example.com:5432/reports"
+pool_size = 15
+"#,
+    )
+    .unwrap_or_else(|err| panic!("write failed: {err}"));
+
+    let expected = ParityConfig {
+        host: "file.example.com".into(),
+        port: 7443,
+        webhook_url: "https://file.example.com/hooks/deploy".into(),
+        tls_enabled: false,
+        timeout_seconds: 20,
+        workers: Some(4),
+        database: ParityDatabase {
+            url: "postgres://db.file.example.com:5432/reports".into(),
+            pool_size: 15,
+        },
+    };
+
+    let from_direct: ParityConfig = conflaguration::from_file(&path).unwrap_or_else(|err| panic!("from_file failed: {err}"));
+    let from_builder: ParityConfig = conflaguration::builder()
+        .file(&path)
+        .build()
+        .unwrap_or_else(|err| panic!("builder file build failed: {err}"));
+
+    assert_eq!(from_direct, expected, "from_file() must match the hand-built literal field-for-field");
+    assert_eq!(from_builder, expected, "builder().file().build() must match the hand-built literal field-for-field");
 }

@@ -9,97 +9,37 @@
 //! [`init`] is just `from_env()` then `validate()`, returning the first error
 //! from either — so propagate it with `?`, never `unwrap`.
 //!
-//! ```rust,ignore
-//! use conflaguration::{Settings, Validate, init};
-//!
-//! #[derive(Settings, Validate)]
-//! #[settings(prefix = "APP")]
-//! struct Config {
-//!     #[setting(default = 8080)]
-//!     port: u16,                         // reads APP_PORT
-//!
-//!     #[setting(default = "localhost")]
-//!     host: String,                      // reads APP_HOST
-//! }
-//!
-//! fn main() -> conflaguration::Result<()> {
-//!     let config: Config = init()?;      // from_env + validate, `?` surfaces failures
-//!     println!("listening on {}:{}", config.host, config.port);
-//!     Ok(())
-//! }
-//! ```
+//! A runnable version — `#[setting(default = 8080)] port: u16` reading
+//! `APP_PORT`, `#[setting(default = "localhost")] host: String` reading
+//! `APP_HOST` — lives on the [`Settings`] derive macro's own docs, since that
+//! macro is what actually resolves the fields; see it there (requires the
+//! `derive` feature).
 //!
 //! ## 2. Handle the error instead of unwrapping
 //!
 //! [`init`] can fail two ways, and the [`Error`] enum tells you which: a bad or
 //! missing env var ([`Error::Env`]) or a failed validation rule
-//! ([`Error::Validation`]). Match on it to react meaningfully:
-//!
-//! ```rust,ignore
-//! use conflaguration::{Error, init};
-//!
-//! match init::<Config>() {
-//!     Ok(config) => run(config),
-//!     // a var was missing or didn't parse; env_err names the key, type, and value
-//!     Err(Error::Env(env_err)) => eprintln!("bad environment: {env_err}"),
-//!     // your validate() rules rejected fields; each carries a dotted path
-//!     Err(Error::Validation { errors }) => {
-//!         for failure in errors {
-//!             eprintln!("{}: {}", failure.path, failure.message);
-//!         }
-//!     }
-//!     Err(other) => eprintln!("config error: {other}"),
-//! }
-//! ```
+//! ([`Error::Validation`]). Match on it to react meaningfully — a runnable
+//! walkthrough of all three outcomes (parse failure, validation failure,
+//! success) lives on the [`Validate`] derive macro's own docs, since that is
+//! the trait whose failures you are matching on.
 //!
 //! ## 3. Nest and flatten sub-structs
 //!
 //! Any field whose type also derives [`Settings`] becomes a sub-section. The
-//! env key is built by accumulating the parent prefix with a segment; the four
-//! forms below cover every layout. The same `Database` type is reused three
-//! times without collisions because each field supplies its own segment.
+//! env key is built by accumulating the parent prefix with a segment; four
+//! forms cover every layout:
 //!
-//! ```rust,ignore
-//! use conflaguration::{Settings, Validate, init};
+//! - `#[setting(nested)]` — segment = the field's own uppercased name.
+//! - `#[setting(nested, prefix = "X")]` — segment renamed to `X`.
+//! - `#[setting(nested, override_prefix = "X")]` — absolute prefix `X`,
+//!   ignoring everything accumulated so far.
+//! - `#[setting(flatten)]` — no segment; the inner fields join the parent
+//!   namespace directly.
 //!
-//! #[derive(Settings, Validate)]
-//! struct Database {
-//!     #[setting(default = "localhost")]
-//!     host: String,
-//!     #[setting(default = 5432)]
-//!     port: u16,
-//! }
-//!
-//! #[derive(Settings, Validate)]
-//! struct Tls {
-//!     #[setting(default = false)]
-//!     enabled: bool,
-//! }
-//!
-//! #[derive(Settings, Validate)]
-//! #[settings(prefix = "APP")]
-//! struct Config {
-//!     #[setting(envs = "DATABASE_URL", override)]
-//!     url: String,                       // DATABASE_URL          (exact key, ignores prefix)
-//!
-//!     #[setting(nested)]
-//!     primary: Database,                 // APP_PRIMARY_HOST/PORT  (segment = field name)
-//!
-//!     #[setting(nested, prefix = "RO")]
-//!     replica: Database,                 // APP_RO_HOST/PORT       (segment renamed)
-//!
-//!     #[setting(nested, override_prefix = "PG")]
-//!     audit: Database,                   // PG_HOST/PORT           (absolute, ignores APP)
-//!
-//!     #[setting(flatten)]
-//!     tls: Tls,                          // APP_ENABLED            (merged, no segment)
-//! }
-//!
-//! fn main() -> conflaguration::Result<()> {
-//!     let config: Config = init()?;
-//!     Ok(())
-//! }
-//! ```
+//! A runnable example exercising all four on one struct, with the resulting
+//! env keys asserted, lives on the [`Settings`] derive macro's docs (second
+//! example); the printed full key list is in the crate's `docs/guide.md`.
 //!
 //! A sub-struct's own `#[settings(prefix = "...")]` is used only when it is
 //! resolved directly as a root; once embedded, the embedding field decides the
@@ -121,21 +61,10 @@
 //!   lacks, keep existing non-null values.
 //!
 //! So order is precedence for overrides (last wins per key); overlays fill gaps.
-//!
-//! ```rust,ignore
-//! fn main() -> conflaguration::Result<()> {
-//!     conflaguration::load()?;            // optional: pull a .env file into the process
-//!
-//!     let config: Config = conflaguration::builder()
-//!         .file("base.toml")              // base layer (full)
-//!         .file("prod.toml")              // override: prod's keys win
-//!         .overlay_mapping(fallbacks)     // overlay: fill only keys still unset
-//!         .env()                          // override: set env vars win
-//!         .validate()
-//!         .build()?;
-//!     Ok(())
-//! }
-//! ```
+//! A runnable example contrasting override and overlay lives on
+//! [`ConfigBuilder::mapping`]'s docs (requires the `toml`, `json`, or `yaml`
+//! feature); a file-based version with the per-key precedence printed is in
+//! the crate's `docs/guide.md`.
 //!
 //! [`value`](ConfigBuilder::value) seeds the chain from an owned `T` (the
 //! struct↔fluent flop), and [`build`](ConfigBuilder::build) hands it back.
@@ -155,95 +84,242 @@
 //! [`Settings`]: trait@Settings
 //! [`Validate`]: trait@Validate
 
+#![cfg_attr(not(any(feature = "default", feature = "std")), no_std)]
 #![warn(missing_docs)]
 
+#[cfg(any(feature = "default", feature = "std"))]
 mod builder;
+#[cfg(any(feature = "default", feature = "std"))]
 pub mod template;
 
+#[cfg(any(feature = "default", feature = "std"))]
 pub use builder::ConfigBuilder;
+
+pub use conflaguration_core::{BorrowedSettings, ResolveError, ResolveFromSource, SettingState, SettingsLayers, SettingsSource, resolve_color};
+
+#[cfg(all(feature = "alloc", not(any(feature = "default", feature = "std"))))]
+pub use conflaguration_core::{Validate, ValidationError, ValidationMessage};
+
+#[cfg(feature = "derive")]
+pub use conflaguration_derive::BorrowedSettings;
 
 /// Trait for parsing a value from an environment-variable string. Implemented
 /// for the standard scalar types; implement it to support custom field types.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::FromEnvStr;
 
 /// Load a `.env` file from the default location into the process environment.
 /// Existing variables are left untouched; missing file is a no-op.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::load;
 /// Like [`load`] but values in the `.env` file overwrite existing variables.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::load_override;
 /// Like [`load_override`] but reads the `.env` file from an explicit path.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::load_override_path;
 /// Like [`load`] but reads the `.env` file from an explicit path.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::load_path;
 
 /// Resolve the first set key in `keys`, parsing it into `T`. Errors if none set.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::resolve;
 /// Resolve the first set key, falling back to `default` when none is set.
 /// Parse errors on a present key still propagate.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::resolve_or;
 /// Resolve the first set key, computing the fallback lazily when none is set.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::resolve_or_else;
 /// Resolve the first set key, parsing `default_str` as the fallback when none is set.
+#[cfg(any(feature = "default", feature = "std"))]
 pub use environs::resolve_or_parse;
 
 /// Derive macro: implement [`ConfigDisplay`] for a struct.
-#[cfg(feature = "derive")]
+#[cfg(all(feature = "derive", any(feature = "default", feature = "std")))]
 pub use conflaguration_derive::ConfigDisplay;
 /// Derive macro: implement the [`Settings`](trait@Settings) trait for a struct.
 /// Resolves each field from the environment; see below for the attribute list.
-#[cfg(feature = "derive")]
+///
+/// ```rust
+/// use conflaguration::{Settings, Validate, init};
+///
+/// #[derive(Settings, Validate)]
+/// #[settings(prefix = "CONFLAGURATION_TUTORIAL_BASIC")]
+/// struct Config {
+///     #[setting(default = 8080)]
+///     port: u16,                         // reads CONFLAGURATION_TUTORIAL_BASIC_PORT
+///
+///     #[setting(default = "localhost")]
+///     host: String,                      // reads CONFLAGURATION_TUTORIAL_BASIC_HOST
+/// }
+///
+/// // no env vars set: falls back to the #[setting(default = ...)] values.
+/// let config: Config = init()?;
+/// assert_eq!(config.port, 8080);
+/// assert_eq!(config.host, "localhost");
+/// # Ok::<(), conflaguration::Error>(())
+/// ```
+///
+/// A field whose type also derives `Settings` becomes a sub-section. Four
+/// attribute forms cover every nesting layout; the same `Database` type is
+/// reused four times below without key collisions, because each field
+/// supplies its own segment (or none, for `flatten`):
+///
+/// ```rust
+/// use conflaguration::{Settings, Validate, init};
+///
+/// #[derive(Settings, Validate)]
+/// struct Database {
+///     #[setting(default = "localhost")]
+///     host: String,
+/// }
+///
+/// #[derive(Settings, Validate)]
+/// #[settings(prefix = "CONFLAGURATION_TUTORIAL_NEST")]
+/// struct Config {
+///     #[setting(nested)]
+///     primary: Database,                 // CONFLAGURATION_TUTORIAL_NEST_PRIMARY_HOST
+///
+///     #[setting(nested, prefix = "RO")]
+///     replica: Database,                 // CONFLAGURATION_TUTORIAL_NEST_RO_HOST
+///
+///     #[setting(nested, override_prefix = "SHARED")]
+///     cache: Database,                   // SHARED_HOST (absolute, ignores the parent)
+///
+///     #[setting(flatten)]
+///     extra: Database,                   // CONFLAGURATION_TUTORIAL_NEST_HOST (merged, no segment)
+/// }
+///
+/// unsafe { std::env::set_var("CONFLAGURATION_TUTORIAL_NEST_PRIMARY_HOST", "primary-db") };
+/// unsafe { std::env::set_var("CONFLAGURATION_TUTORIAL_NEST_RO_HOST", "replica-db") };
+/// unsafe { std::env::set_var("SHARED_HOST", "cache-db") };
+/// unsafe { std::env::set_var("CONFLAGURATION_TUTORIAL_NEST_HOST", "flattened-db") };
+///
+/// let config: Config = init()?;
+/// assert_eq!(config.primary.host, "primary-db");
+/// assert_eq!(config.replica.host, "replica-db");
+/// assert_eq!(config.cache.host, "cache-db");
+/// assert_eq!(config.extra.host, "flattened-db");
+///
+/// # for key in ["CONFLAGURATION_TUTORIAL_NEST_PRIMARY_HOST", "CONFLAGURATION_TUTORIAL_NEST_RO_HOST", "SHARED_HOST", "CONFLAGURATION_TUTORIAL_NEST_HOST"] {
+/// #     unsafe { std::env::remove_var(key) };
+/// # }
+/// # Ok::<(), conflaguration::Error>(())
+/// ```
+#[cfg(all(feature = "derive", any(feature = "default", feature = "std")))]
 pub use conflaguration_derive::Settings;
 /// Derive macro: implement [`Validate`], cascading into `nested`/`flatten` fields.
-#[cfg(feature = "derive")]
+///
+/// [`init`] resolves and then validates in one step, returning the first
+/// [`Error`] from either stage. Match on the variant to react: a bad or
+/// missing env var is [`Error::Env`]; a failed `validate()` rule is
+/// [`Error::Validation`], carrying one [`ValidationMessage`] per failure.
+///
+/// ```rust
+/// use conflaguration::{Error, Settings, Validate, ValidationMessage, init};
+///
+/// #[derive(Settings)]
+/// #[settings(prefix = "CONFLAGURATION_TUTORIAL_ERR")]
+/// struct Config {
+///     #[setting(default = 8080)]
+///     port: u16,
+/// }
+///
+/// impl Validate for Config {
+///     fn validate(&self) -> conflaguration::Result<()> {
+///         if self.port == 0 {
+///             return Err(Error::Validation { errors: vec![ValidationMessage::new("port", "must be > 0")] });
+///         }
+///         Ok(())
+///     }
+/// }
+///
+/// fn describe(result: conflaguration::Result<Config>) -> String {
+///     match result {
+///         Ok(config) => format!("ok: port={}", config.port),
+///         // a var was missing or didn't parse; env_err names the key, type, and value
+///         Err(Error::Env(env_err)) => format!("bad environment: {env_err}"),
+///         // your validate() rules rejected fields; each carries a dotted path
+///         Err(Error::Validation { errors }) => {
+///             errors.iter().map(|failure| format!("{}: {}", failure.path, failure.message)).collect::<Vec<_>>().join("; ")
+///         }
+///         Err(other) => format!("config error: {other}"),
+///     }
+/// }
+///
+/// unsafe { std::env::set_var("CONFLAGURATION_TUTORIAL_ERR_PORT", "not-a-number") };
+/// assert!(describe(init::<Config>()).starts_with("bad environment:"));
+///
+/// unsafe { std::env::set_var("CONFLAGURATION_TUTORIAL_ERR_PORT", "0") };
+/// assert_eq!(describe(init::<Config>()), "port: must be > 0");
+///
+/// unsafe { std::env::set_var("CONFLAGURATION_TUTORIAL_ERR_PORT", "9090") };
+/// assert_eq!(describe(init::<Config>()), "ok: port=9090");
+///
+/// # unsafe { std::env::remove_var("CONFLAGURATION_TUTORIAL_ERR_PORT") };
+/// ```
+#[cfg(all(feature = "derive", any(feature = "default", feature = "std")))]
 pub use conflaguration_derive::Validate;
 
 /// Derive macro: implement [`ConfigCodegen`] for a flat scalar struct.
-#[cfg(feature = "derive")]
+#[cfg(all(feature = "derive", any(feature = "default", feature = "std")))]
 pub use conflaguration_derive::ConfigCodegen;
 
 /// Re-exported so generated and downstream code can name the file-loader bound.
-#[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml")))]
 pub use serde::de::DeserializeOwned;
 
-#[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml")))]
 mod file;
 
 /// Load and deserialize a config file, detecting the format by lowercase
 /// extension (`.toml`, `.json`, `.yaml`, `.yml`). Other extensions are rejected.
-#[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml")))]
 pub use file::from_file;
 /// Load from a file, then overlay environment variables on top.
-#[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml")))]
 pub use file::from_file_then_env;
 /// Load from a file, overlay env, then apply a final mutation (e.g. CLI flags).
-#[cfg(any(feature = "toml", feature = "json", feature = "yaml"))]
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml")))]
 pub use file::from_file_then_env_then;
 /// Deserialize a config value from a JSON string.
-#[cfg(feature = "json")]
+#[cfg(all(any(feature = "default", feature = "std"), feature = "json"))]
 pub use file::from_json_str;
 /// Deserialize a config value from a TOML string.
-#[cfg(feature = "toml")]
+#[cfg(all(any(feature = "default", feature = "std"), feature = "toml"))]
 pub use file::from_toml_str;
 /// Deserialize a config value from a YAML string.
-#[cfg(feature = "yaml")]
+#[cfg(all(any(feature = "default", feature = "std"), feature = "yaml"))]
 pub use file::from_yaml_str;
 
 /// Crate-level result type.
+#[cfg(any(feature = "default", feature = "std"))]
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Join an accumulated prefix with a key segment. Empty prefix yields the bare
 /// segment so root structs without a prefix produce clean keys.
 #[doc(hidden)]
 #[must_use]
+#[cfg(any(feature = "default", feature = "std"))]
 pub fn join_key(prefix: &str, segment: &str) -> String {
     if prefix.is_empty() {
         segment.to_owned()
     } else {
-        format!("{prefix}_{segment}")
+        // format! under-sizes its buffer for this shape, causing a realloc
+        // on every call (measured: benches/bench_conflaguration.rs); exact
+        // capacity up front makes this one allocation, not two.
+        let mut joined = String::with_capacity(prefix.len() + 1 + segment.len());
+        joined.push_str(prefix);
+        joined.push('_');
+        joined.push_str(segment);
+        joined
     }
 }
 
 /// A single validation failure, keyed by dotted field path.
+#[cfg(any(feature = "default", feature = "std"))]
 #[derive(Debug, Clone)]
 pub struct ValidationMessage {
     /// Dotted path to the offending field, e.g. `database.host`.
@@ -252,6 +328,7 @@ pub struct ValidationMessage {
     pub message: String,
 }
 
+#[cfg(any(feature = "default", feature = "std"))]
 impl ValidationMessage {
     /// Build a message for `path` with the given failure `message`.
     pub fn new(path: impl Into<String>, message: impl Into<String>) -> Self {
@@ -272,6 +349,7 @@ impl ValidationMessage {
     }
 }
 
+#[cfg(any(feature = "default", feature = "std"))]
 impl std::fmt::Display for ValidationMessage {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if self.path.is_empty() {
@@ -283,6 +361,7 @@ impl std::fmt::Display for ValidationMessage {
 }
 
 /// All error types produced by conflaguration.
+#[cfg(any(feature = "default", feature = "std"))]
 #[non_exhaustive]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -343,6 +422,7 @@ pub enum Error {
 /// scalar field contributes its uppercased name as the final segment; a nested
 /// field contributes its name (or chosen segment) and recurses. So a `host`
 /// field two levels deep under prefix `APP` resolves `APP_<SEGMENT>_HOST`.
+#[cfg(any(feature = "default", feature = "std"))]
 pub trait Settings: Sized {
     /// The struct's own prefix, used only when it is the root of resolution.
     /// When embedded as a nested field, the embedding field decides the prefix.
@@ -373,6 +453,7 @@ pub trait Settings: Sized {
 ///
 /// Derive with `#[derive(Validate)]` to cascade into `nested` and `flatten`
 /// fields, or implement manually for custom rules.
+#[cfg(any(feature = "default", feature = "std"))]
 pub trait Validate {
     /// Check the constructed config, returning [`Error::Validation`] with every
     /// failure collected, or `Ok(())` when all rules pass.
@@ -380,6 +461,7 @@ pub trait Validate {
 }
 
 /// Construct from env and validate in one step.
+#[cfg(any(feature = "default", feature = "std"))]
 pub fn init<T: Settings + Validate>() -> Result<T> {
     let settings = T::from_env()?;
     settings.validate()?;
@@ -387,11 +469,13 @@ pub fn init<T: Settings + Validate>() -> Result<T> {
 }
 
 /// Start a fluent builder for layered config: defaults, env, files, overrides.
+#[cfg(any(feature = "default", feature = "std"))]
 pub fn builder<T>() -> ConfigBuilder<T> {
     ConfigBuilder::new()
 }
 
 /// Resolve an env var through a custom parse function. Errors if no key is set.
+#[cfg(any(feature = "default", feature = "std"))]
 pub fn resolve_with<T, E, F>(keys: &[&str], parse_fn: F) -> Result<T>
 where
     E: std::error::Error + Send + Sync + 'static,
@@ -401,6 +485,7 @@ where
 }
 
 /// Resolve through a custom parse function, falling back to `default` if no key is set.
+#[cfg(any(feature = "default", feature = "std"))]
 pub fn resolve_with_or<T, E, F>(keys: &[&str], parse_fn: F, default: T) -> Result<T>
 where
     E: std::error::Error + Send + Sync + 'static,
@@ -414,6 +499,7 @@ where
 }
 
 /// Resolve through a custom parse function; if no key is set, parse `default_str` instead.
+#[cfg(any(feature = "default", feature = "std"))]
 pub fn resolve_with_or_str<T, E, F>(keys: &[&str], parse_fn: F, default_str: &str) -> Result<T>
 where
     E: std::error::Error + Send + Sync + 'static,
@@ -442,6 +528,7 @@ where
 /// runtime override" pattern (see the [`codegen`] module).
 ///
 /// Derive with `#[derive(ConfigCodegen)]` on a flat struct of scalar fields.
+#[cfg(any(feature = "default", feature = "std"))]
 pub trait ConfigCodegen {
     /// Render the value as a `pub const` module (with a do-not-edit header),
     /// suitable to write into `OUT_DIR` and `include!` from the crate.
@@ -460,6 +547,7 @@ pub trait ConfigCodegen {
 /// Render config fields with their env var keys for debugging/logging.
 ///
 /// Derive with `#[derive(ConfigDisplay)]` for automatic implementation.
+#[cfg(any(feature = "default", feature = "std"))]
 pub trait ConfigDisplay {
     /// Write each field at the given indentation `depth`, using the struct's
     /// own prefix for the displayed env keys.
@@ -491,8 +579,10 @@ pub trait ConfigDisplay {
 }
 
 /// [`Display`](std::fmt::Display) adapter returned by [`ConfigDisplay::display`].
+#[cfg(any(feature = "default", feature = "std"))]
 pub struct ConfigView<'a, T: ConfigDisplay + ?Sized>(&'a T);
 
+#[cfg(any(feature = "default", feature = "std"))]
 impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigView<'_, T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.0.fmt_config(formatter, 0)
@@ -501,11 +591,13 @@ impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigView<'_, T> {
 
 /// [`Display`](std::fmt::Display) adapter returned by
 /// [`ConfigDisplay::display_with_prefix`], rendering keys under a runtime prefix.
+#[cfg(any(feature = "default", feature = "std"))]
 pub struct ConfigPrefixView<'a, T: ConfigDisplay + ?Sized> {
     inner: &'a T,
     prefix: &'a str,
 }
 
+#[cfg(any(feature = "default", feature = "std"))]
 impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigPrefixView<'_, T> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.inner.fmt_config_with_prefix(formatter, 0, self.prefix)
@@ -515,6 +607,12 @@ impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigPrefixView<'_, T> {
 /// Build-script helpers for the two-tier pattern: resolve a config at build time,
 /// bake it into compile-time constants, and emit the cargo directives that keep
 /// the generated file fresh. Pair with `#[derive(ConfigCodegen)]`.
+///
+/// Kept `ignore`, not converted to a running doctest: `write_consts` panics
+/// without `OUT_DIR`, which only cargo sets for an actual `build.rs`
+/// invocation — a doctest process never has it. The executed proof is
+/// `examples/codegen/build.rs`, built and run as part of `cargo build
+/// --examples`.
 ///
 /// ```rust,ignore
 /// // build.rs
@@ -535,7 +633,7 @@ impl<T: ConfigDisplay + ?Sized> std::fmt::Display for ConfigPrefixView<'_, T> {
 ///     Ok(())
 /// }
 /// ```
-#[cfg(feature = "codegen")]
+#[cfg(all(feature = "codegen", any(feature = "default", feature = "std")))]
 pub mod codegen {
     use std::path::Path;
     use std::path::PathBuf;
@@ -572,17 +670,50 @@ pub mod codegen {
     }
 }
 
-#[cfg(test)]
+// exposes conflaguration's own feature state as a value: a doctest compiles
+// as its own crate linking conflaguration, so `#[cfg(feature = "derive")]`
+// written inside a doctest body would refer to the doctest crate's features,
+// not this crate's -- this const is what doctest_guard below can see.
+#[doc(hidden)]
+pub const DOC_FEATURES_COMPLETE: bool = cfg!(all(feature = "derive", feature = "toml", feature = "codegen"));
+
+// wires README.md's fenced code blocks into `cargo test --doc` so they can't
+// silently rot; only exists in rustdoc's test pass (cfg(doctest)), never in a
+// normal build, so it can't affect `cargo build`/clippy or public doc pages.
+#[cfg(all(doctest, any(feature = "default", feature = "std"), feature = "derive", feature = "toml", feature = "codegen"))]
+#[doc = include_str!("../README.md")]
+mod readme_doctests {}
+
+// same as `readme_doctests`, for the task-oriented guide.
+#[cfg(all(doctest, any(feature = "default", feature = "std"), feature = "derive", feature = "toml", feature = "codegen"))]
+#[doc = include_str!("../docs/guide.md")]
+mod guide_doctests {}
+
+// mirrors bench_guard: the README/guide doctests vanish without their
+// features, so this one always runs and fails loudly rather than letting a
+// flagless `cargo test --doc` exit 0 having checked almost nothing.
+#[cfg(all(doctest, any(feature = "default", feature = "std")))]
+/// ```
+/// assert!(
+///     conflaguration::DOC_FEATURES_COMPLETE,
+///     "README/guide doctests were skipped -- run: cargo test --doc --features derive,toml,codegen"
+/// );
+/// ```
+mod doctest_guard {}
+
+#[cfg(all(test, any(feature = "default", feature = "std")))]
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used)]
 
     use super::*;
 
+    #[cfg(any(feature = "default", feature = "std"))]
     struct TestConfig {
         port: u16,
         name: String,
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     impl Settings for TestConfig {
         fn from_env() -> Result<Self> {
             Ok(Self {
@@ -592,6 +723,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     impl Validate for TestConfig {
         fn validate(&self) -> Result<()> {
             let mut errors = vec![];
@@ -606,6 +738,31 @@ mod tests {
     }
 
     #[test]
+    fn join_key_empty_prefix_returns_bare_segment() {
+        assert_eq!(join_key("", "PORT"), "PORT");
+    }
+
+    #[test]
+    fn join_key_joins_with_underscore() {
+        assert_eq!(join_key("APP", "PORT"), "APP_PORT");
+    }
+
+    #[test]
+    fn join_key_empty_segment_still_underscores() {
+        assert_eq!(join_key("APP", ""), "APP_");
+    }
+
+    #[test]
+    fn join_key_sizes_the_buffer_by_bytes_not_chars() {
+        // multi-byte UTF-8 (é = 2 bytes): a char-count capacity estimate
+        // would under-size this and still be correct only by accident of
+        // String's grow-on-demand fallback -- assert the byte-exact result.
+        assert_eq!(join_key("CAFÉ", "PORT"), "CAFÉ_PORT");
+        assert_eq!(join_key("CAFÉ", "PORT").len(), "CAFÉ".len() + 1 + "PORT".len());
+    }
+
+    #[cfg(any(feature = "default", feature = "std"))]
+    #[test]
     fn from_env_with_defaults() {
         temp_env::with_vars([("TEST_CONFLAG_PORT", None::<&str>), ("TEST_CONFLAG_NAME", None::<&str>)], || {
             let config = TestConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
@@ -614,6 +771,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn from_env_reads_environment() {
         temp_env::with_vars([("TEST_CONFLAG_PORT", Some("3000")), ("TEST_CONFLAG_NAME", Some("myapp"))], || {
@@ -623,12 +781,14 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn validate_passes_on_valid_config() {
         let config = TestConfig { port: 8080, name: "app".into() };
         assert!(config.validate().is_ok());
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn validate_collects_all_errors() {
         let config = TestConfig { port: 0, name: String::new() };
@@ -645,6 +805,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn init_combines_from_env_and_validate() {
         temp_env::with_vars([("TEST_CONFLAG_PORT", Some("9090")), ("TEST_CONFLAG_NAME", Some("production"))], || {
@@ -654,6 +815,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn init_propagates_validation_error() {
         temp_env::with_vars([("TEST_CONFLAG_PORT", Some("0")), ("TEST_CONFLAG_NAME", Some(""))], || {
@@ -662,6 +824,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn env_error_propagates_through() {
         temp_env::with_vars([("TEST_CONFLAG_PORT", Some("banana")), ("TEST_CONFLAG_NAME", None::<&str>)], || {
@@ -702,14 +865,17 @@ mod tests {
         assert_eq!(msg.to_string(), "config: something went wrong");
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     fn infallible_parse(value: &str) -> std::result::Result<Vec<String>, std::convert::Infallible> {
         Ok(value.split(',').map(|s| s.trim().to_string()).collect())
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     fn fallible_parse(value: &str) -> std::result::Result<u16, std::num::ParseIntError> {
         value.parse()
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_returns_parsed_value() {
         temp_env::with_vars([("TEST_RW_HAPPY", Some("a,b,c"))], || {
@@ -718,6 +884,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_errors_on_missing_key() {
         temp_env::with_vars([("TEST_RW_MISS", None::<&str>)], || {
@@ -726,6 +893,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_propagates_parse_error() {
         temp_env::with_vars([("TEST_RW_BAD", Some("notanumber"))], || {
@@ -734,6 +902,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_returns_parsed_when_set() {
         temp_env::with_vars([("TEST_RWO_HIT", Some("42"))], || {
@@ -742,6 +911,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_returns_default_when_missing() {
         temp_env::with_vars([("TEST_RWO_MISS", None::<&str>)], || {
@@ -750,6 +920,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_propagates_parse_error_despite_default() {
         temp_env::with_vars([("TEST_RWO_BAD", Some("banana"))], || {
@@ -758,6 +929,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_returns_parsed_when_set() {
         temp_env::with_vars([("TEST_RWOS_HIT", Some("a,b"))], || {
@@ -766,6 +938,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_uses_default_str_when_missing() {
         temp_env::with_vars([("TEST_RWOS_MISS", None::<&str>)], || {
@@ -774,6 +947,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_propagates_error_on_env_value() {
         temp_env::with_vars([("TEST_RWOS_BAD", Some("notanumber"))], || {
@@ -782,6 +956,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_propagates_error_on_default_str() {
         temp_env::with_vars([("TEST_RWOS_BAD_DEF", None::<&str>)], || {
@@ -790,6 +965,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_error_shows_default_key_when_missing() {
         temp_env::with_vars([("TEST_RWOS_ERR_KEY", None::<&str>)], || {
@@ -799,6 +975,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_error_shows_env_key_when_set() {
         temp_env::with_vars([("TEST_RWOS_ERR_ENV", Some("banana"))], || {
@@ -808,6 +985,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_cascades_to_second_key() {
         temp_env::with_vars([("TEST_RW_CASC_A", None::<&str>), ("TEST_RW_CASC_B", Some("1,2"))], || {
@@ -816,6 +994,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_cascade_errors_on_first_bad_value() {
         temp_env::with_vars([("TEST_RW_CASC_BAD", Some("notanumber")), ("TEST_RW_CASC_GOOD", Some("42"))], || {
@@ -824,6 +1003,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_cascades_to_second_key() {
         temp_env::with_vars([("TEST_RWO_CASC_A", None::<&str>), ("TEST_RWO_CASC_B", Some("99"))], || {
@@ -832,6 +1012,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_cascades_to_second_key() {
         temp_env::with_vars([("TEST_RWOS_CASC_A", None::<&str>), ("TEST_RWOS_CASC_B", Some("a,b"))], || {
@@ -840,6 +1021,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_cascade_errors_on_first_bad_value() {
         temp_env::with_vars([("TEST_RWOS_CASC_BAD", Some("nope")), ("TEST_RWOS_CASC_OK", Some("42"))], || {
@@ -848,6 +1030,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_receives_empty_string_when_env_set_empty() {
         temp_env::with_vars([("TEST_RW_EMPTY", Some(""))], || {
@@ -856,6 +1039,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_receives_empty_string_not_default() {
         temp_env::with_vars([("TEST_RWO_EMPTY", Some(""))], || {
@@ -864,6 +1048,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_receives_empty_string_not_default() {
         temp_env::with_vars([("TEST_RWOS_EMPTY", Some(""))], || {
@@ -872,12 +1057,14 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_empty_keys_uses_default_str() {
         let result = resolve_with_or_str::<Vec<String>, _, _>(&[], infallible_parse, "a,b");
         assert_eq!(result.unwrap_or_else(|err| panic!("failed: {err}")), vec!["a", "b"]);
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn resolve_with_or_str_empty_keys_error_shows_default_key() {
         let result = resolve_with_or_str::<u16, _, _>(&[], fallible_parse, "banana");
@@ -885,10 +1072,12 @@ mod tests {
         assert!(msg.contains("<default>"), "expected <default> in error, got: {msg}");
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     struct ManualConfig {
         value: String,
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     impl Settings for ManualConfig {
         fn from_env() -> Result<Self> {
             Ok(Self {
@@ -897,6 +1086,7 @@ mod tests {
         }
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn trait_default_from_env_with_prefix_delegates_to_from_env() {
         temp_env::with_vars([("TEST_MANUAL_VAL", Some("hello"))], || {
@@ -905,6 +1095,7 @@ mod tests {
         });
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn trait_default_override_from_env_is_noop() {
         let mut config = ManualConfig { value: "original".into() };
@@ -912,6 +1103,7 @@ mod tests {
         assert_eq!(config.value, "original");
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn trait_default_override_from_env_with_prefix_is_noop() {
         let mut config = ManualConfig { value: "original".into() };
@@ -921,16 +1113,19 @@ mod tests {
         assert_eq!(config.value, "original");
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     struct DisplayableConfig {
         port: u16,
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     impl ConfigDisplay for DisplayableConfig {
         fn fmt_config(&self, formatter: &mut std::fmt::Formatter<'_>, _depth: usize) -> std::fmt::Result {
             write!(formatter, "port={}", self.port)
         }
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn config_view_display_delegates_to_fmt_config() {
         let config = DisplayableConfig { port: 8080 };
@@ -938,6 +1133,7 @@ mod tests {
         assert_eq!(format!("{view}"), "port=8080");
     }
 
+    #[cfg(any(feature = "default", feature = "std"))]
     #[test]
     fn config_prefix_view_uses_default_fmt_config_with_prefix() {
         let config = DisplayableConfig { port: 3000 };

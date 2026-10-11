@@ -1,0 +1,96 @@
+# ALREADY APPLIED — this file is a record, not a pending patch.
+#
+# Landed directly in ~/repos/mine/environs on 2026-09-15 as uncommitted
+# working-tree changes. Do not `git apply` this; environs already carries it.
+#
+# An earlier revision of this file was fabricated: it patched a Cargo.toml
+# containing anyhow/tracing-subscriber/serde_json and a src/lib.rs with a
+# `telemetry` module, none of which exist in environs. It would not have
+# applied to any repo. The diff below is the real one, taken from
+# `git diff` in the environs working tree.
+
+diff --git a/Cargo.toml b/Cargo.toml
+index 0c2ba7d..a5a1806 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -1,6 +1,6 @@
+ [package]
+ name = "environs"
+-version = "1.2.0"
++version = "1.3.0"
+ edition = "2024"
+ description = "typed environment variable resolution with fallback key chains"
+ license = "MIT"
+@@ -10,7 +10,7 @@ categories = ["config"]
+
+ [dependencies]
+ thiserror = "2"
+-tracing = "0.1"
++tracing = { version = "0.1", optional = true }
+ falsehoods = "1.0.0"
+ chrono = { version = "0.4.43", optional = true }
+
+@@ -27,4 +27,6 @@ temp-env = "0.3.6"
+ tempfile = "3.25.0"
+
+ [features]
++default = ["tracing"]
++tracing = ["dep:tracing"]
+ chrono = ["dep:chrono"]
+diff --git a/src/dotenv.rs b/src/dotenv.rs
+index 49ad5e1..205faa5 100644
+--- a/src/dotenv.rs
++++ b/src/dotenv.rs
+@@ -7,6 +7,17 @@ use crate::error::Error;
+ const DOTENV_PATH_KEY: &str = "DOTENV_PATH";
+ const DEFAULT_DOTENV: &str = ".env";
+
++// keeps the four call sites free of per-line cfg when the tracing feature is disabled
++#[cfg(feature = "tracing")]
++macro_rules! debug {
++    ($($arg:tt)*) => { ::tracing::debug!($($arg)*) };
++}
++
++#[cfg(not(feature = "tracing"))]
++macro_rules! debug {
++    ($($arg:tt)*) => {};
++}
++
+ fn resolve_dotenv_path() -> PathBuf {
+     std::env::var(DOTENV_PATH_KEY)
+         .map(PathBuf::from)
+@@ -70,14 +81,14 @@ fn apply_entries(path: &Path, override_existing: bool) -> crate::error::Result<()
+         }
+     }
+
+-    tracing::debug!(path = %path.display(), "loaded dotenv");
++    debug!(path = %path.display(), "loaded dotenv");
+     Ok(())
+ }
+
+ pub fn load() -> crate::error::Result<()> {
+     let path = resolve_dotenv_path();
+     if !path.exists() {
+-        tracing::debug!(path = %path.display(), "dotenv file not found, skipping");
++        debug!(path = %path.display(), "dotenv file not found, skipping");
+         return Ok(());
+     }
+     load_path(&path)
+@@ -90,7 +101,7 @@ pub fn load_path(path: &Path) -> crate::error::Result<()> {
+ pub fn load_override() -> crate::error::Result<()> {
+     let path = resolve_dotenv_path();
+     if !path.exists() {
+-        tracing::debug!(path = %path.display(), "dotenv file not found, skipping");
++        debug!(path = %path.display(), "dotenv file not found, skipping");
+         return Ok(());
+     }
+     load_override_path(&path)
+@@ -169,7 +180,7 @@ impl DotenvLoader {
+             if entry.required || entry.path.exists() {
+                 apply_entries(&entry.path, do_override)?;
+             } else {
+-                tracing::debug!(path = %entry.path.display(), "dotenv file not found, skipping");
++                debug!(path = %entry.path.display(), "dotenv file not found, skipping");
+             }
+         }
+         Ok(())

@@ -1,4 +1,4 @@
-#![cfg(feature = "derive")]
+#![cfg(all(feature = "derive", any(feature = "default", feature = "std")))]
 #![allow(dead_code)]
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
@@ -1916,7 +1916,10 @@ fn resolve_with_custom_struct_override_replaces() {
 #[test]
 fn builder_with_resolve_with_validate_sad() {
     temp_env::with_vars([("BUILD_RW_TAGS", None::<&str>), ("BUILD_RW_PORT", None::<&str>)], || {
-        let result: conflaguration::Result<BuilderResolveWithConfig> = conflaguration::builder().value(BuilderResolveWithConfig::default()).validate().build();
+        let result: conflaguration::Result<BuilderResolveWithConfig> = conflaguration::builder()
+            .value(BuilderResolveWithConfig::default())
+            .validate()
+            .build();
         assert!(matches!(result, Err(conflaguration::Error::Validation { .. })));
     });
 }
@@ -2066,6 +2069,29 @@ fn duplicate_env_aliases_deduped_uses_value() {
 fn duplicate_env_aliases_deduped_uses_default() {
     temp_env::with_vars([("DUP_ENV_PORT", None::<&str>)], || {
         let config = DuplicateEnvAliasConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert_eq!(config.port, 3000);
+    });
+}
+
+#[derive(Settings)]
+#[settings(prefix = "EMPTY_ENV_LIST")]
+struct EmptyEnvListConfig {
+    #[setting(envs = [], default = 3000)]
+    port: u16,
+}
+
+#[test]
+fn empty_envs_list_falls_back_to_field_name_key() {
+    temp_env::with_vars([("EMPTY_ENV_LIST_PORT", Some("9090"))], || {
+        let config = EmptyEnvListConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
+        assert_eq!(config.port, 9090);
+    });
+}
+
+#[test]
+fn empty_envs_list_falls_back_to_default_when_unset() {
+    temp_env::with_vars([("EMPTY_ENV_LIST_PORT", None::<&str>)], || {
+        let config = EmptyEnvListConfig::from_env().unwrap_or_else(|err| panic!("from_env failed: {err}"));
         assert_eq!(config.port, 3000);
     });
 }

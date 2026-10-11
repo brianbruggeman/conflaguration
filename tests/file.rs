@@ -1,4 +1,4 @@
-#![cfg(all(feature = "derive", any(feature = "toml", feature = "json", feature = "yaml")))]
+#![cfg(all(any(feature = "default", feature = "std"), feature = "derive", any(feature = "toml", feature = "json", feature = "yaml")))]
 #![allow(dead_code)]
 
 use std::io::Write;

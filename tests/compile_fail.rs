@@ -1,4 +1,4 @@
-#![cfg(feature = "derive")]
+#![cfg(all(feature = "derive", any(feature = "default", feature = "std")))]
 
 #[test]
 fn compile_fail() {

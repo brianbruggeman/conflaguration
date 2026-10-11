@@ -7,11 +7,14 @@
 //! compose: a tuple of resolvers is itself a [`Resolver`] that tries each in
 //! order, first match wins.
 //!
-//! ```rust,ignore
+//! ```rust
 //! use conflaguration::template::{EnvResolver, Resolvable};
 //!
-//! // expands {{ env::HOME }} to the HOME env var, errors on anything unresolved
-//! let rendered = "path = {{ env::HOME }}".resolve(&EnvResolver)?;
+//! // expands {{ env::CONFLAG_DOCTEST_HOME }} to the env var, errors on anything unresolved
+//! unsafe { std::env::set_var("CONFLAG_DOCTEST_HOME", "/home/example") };
+//! let rendered = "path = {{ env::CONFLAG_DOCTEST_HOME }}".resolve(&EnvResolver)?;
+//! assert_eq!(&*rendered, b"path = /home/example");
+//! # Ok::<(), conflaguration::template::TemplateError>(())
 //! ```
 
 use std::borrow::Cow;
@@ -32,7 +35,8 @@ impl<A: Resolver, B: Resolver> Resolver for (A, B) {
 
 impl<A: Resolver, B: Resolver, C: Resolver> Resolver for (A, B, C) {
     fn resolve(&self, expr: &str) -> Option<Cow<'_, [u8]>> {
-        self.0.resolve(expr)
+        self.0
+            .resolve(expr)
             .or_else(|| self.1.resolve(expr))
             .or_else(|| self.2.resolve(expr))
     }
@@ -40,7 +44,8 @@ impl<A: Resolver, B: Resolver, C: Resolver> Resolver for (A, B, C) {
 
 impl<A: Resolver, B: Resolver, C: Resolver, D: Resolver> Resolver for (A, B, C, D) {
     fn resolve(&self, expr: &str) -> Option<Cow<'_, [u8]>> {
-        self.0.resolve(expr)
+        self.0
+            .resolve(expr)
             .or_else(|| self.1.resolve(expr))
             .or_else(|| self.2.resolve(expr))
             .or_else(|| self.3.resolve(expr))
@@ -53,7 +58,9 @@ pub struct EnvResolver;
 impl Resolver for EnvResolver {
     fn resolve(&self, expr: &str) -> Option<Cow<'_, [u8]>> {
         let var_name = expr.strip_prefix("env::")?;
-        environs::resolve::<String>(&[var_name]).ok().map(|val| Cow::Owned(val.into_bytes()))
+        environs::resolve::<String>(&[var_name])
+            .ok()
+            .map(|val| Cow::Owned(val.into_bytes()))
     }
 }
 
@@ -80,10 +87,7 @@ pub enum TemplateError {
 /// Expand every `{{ expr }}` token via `resolver`. Returns the input unchanged
 /// (borrowed) when it contains no tokens; errors on an unresolved expression or
 /// non-UTF-8 token. Unclosed `{{` is left literal.
-pub fn render<'a, R: Resolver>(
-    input: &'a [u8],
-    resolver: &R,
-) -> Result<Cow<'a, [u8]>, TemplateError> {
+pub fn render<'a, R: Resolver>(input: &'a [u8], resolver: &R) -> Result<Cow<'a, [u8]>, TemplateError> {
     if !has_template(input) {
         return Ok(Cow::Borrowed(input));
     }
@@ -100,9 +104,10 @@ pub fn render<'a, R: Resolver>(
             let expr = &input[pos + 2..end];
             let expr_str = std::str::from_utf8(expr).map_err(|_| TemplateError::InvalidExpr { offset: pos })?;
             let trimmed = expr_str.trim();
-            let value = resolver
-                .resolve(trimmed)
-                .ok_or_else(|| TemplateError::Unresolved { expr: trimmed.to_string(), offset: pos })?;
+            let value = resolver.resolve(trimmed).ok_or_else(|| TemplateError::Unresolved {
+                expr: trimmed.to_string(),
+                offset: pos,
+            })?;
             result.extend_from_slice(&value);
             pos = end + 2;
             continue;
@@ -116,10 +121,7 @@ pub fn render<'a, R: Resolver>(
 
 /// Like [`render`] but never fails: an unresolved or non-UTF-8 token is copied
 /// through verbatim (`{{ … }}` and all) instead of producing an error.
-pub fn render_lenient<'a, R: Resolver>(
-    input: &'a [u8],
-    resolver: &R,
-) -> Cow<'a, [u8]> {
+pub fn render_lenient<'a, R: Resolver>(input: &'a [u8], resolver: &R) -> Cow<'a, [u8]> {
     if !has_template(input) {
         return Cow::Borrowed(input);
     }

@@ -47,7 +47,9 @@ fn emit_sizing_consts(out_dir: &Path) {
     println!("cargo:rerun-if-changed=sizing.toml");
 
     let text = fs::read_to_string(&toml_path).unwrap_or_else(|err| panic!("read {}: {err}", toml_path.display()));
-    let root: Value = text.parse().unwrap_or_else(|err| panic!("parse {}: {err}", toml_path.display()));
+    let root: Value = text
+        .parse()
+        .unwrap_or_else(|err| panic!("parse {}: {err}", toml_path.display()));
 
     let ring_capacity = require_pow2("ring.capacity", resolve(&root, "ring", "capacity"));
     let flush_interval_micros = require_nonzero("pump.flush_interval_micros", resolve(&root, "pump", "flush_interval_micros"));
