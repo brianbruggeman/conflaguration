@@ -40,6 +40,52 @@ fn env_keys_without_prefix_use_bare_field_names() {
     assert_eq!(NoPrefix::env_keys(), vec!["WORKERS"]);
 }
 
+#[derive(ConfigCodegen)]
+struct LiteralWidths {
+    four_digits: u32,
+    five_digits: usize,
+    seven_digits: u64,
+    negative: i64,
+    widest: u64,
+    flag: bool,
+    label: String,
+}
+
+#[test]
+fn integer_consts_group_digits_in_threes_at_five_or_more_digits() {
+    let config = LiteralWidths {
+        four_digits: 8192,
+        five_digits: 65536,
+        seven_digits: 1_234_567,
+        negative: -1_234_567,
+        widest: u64::MAX,
+        flag: true,
+        label: "wide".into(),
+    };
+    let module = config.to_const_module();
+    assert!(module.contains("pub const FOUR_DIGITS: u32 = 8192;"), "got: {module}");
+    assert!(module.contains("pub const FIVE_DIGITS: usize = 65_536;"), "got: {module}");
+    assert!(module.contains("pub const SEVEN_DIGITS: u64 = 1_234_567;"), "got: {module}");
+    assert!(module.contains("pub const NEGATIVE: i64 = -1_234_567;"), "got: {module}");
+    assert!(module.contains("pub const WIDEST: u64 = 18_446_744_073_709_551_615;"), "got: {module}");
+}
+
+#[test]
+fn bool_and_string_consts_are_not_regrouped() {
+    let config = LiteralWidths {
+        four_digits: 1,
+        five_digits: 1,
+        seven_digits: 1,
+        negative: 1,
+        widest: 1,
+        flag: true,
+        label: "12345".into(),
+    };
+    let module = config.to_const_module();
+    assert!(module.contains("pub const FLAG: bool = true;"), "got: {module}");
+    assert!(module.contains(r#"pub const LABEL: &str = "12345";"#), "got: {module}");
+}
+
 #[test]
 fn string_values_are_quoted_and_escaped() {
     let config = BuildConfig {

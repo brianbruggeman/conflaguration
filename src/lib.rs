@@ -544,6 +544,31 @@ pub trait ConfigCodegen {
         Self: Sized;
 }
 
+/// Group a rendered integer into threes with `_` so generated consts pass
+/// `clippy::unreadable_literal`. Text that is not an integer of five or more
+/// digits is returned unchanged.
+#[doc(hidden)]
+#[must_use]
+#[cfg(any(feature = "default", feature = "std"))]
+pub fn grouped_integer_text(text: &str) -> String {
+    let (sign, digits) = match text.strip_prefix('-') {
+        Some(magnitude) => ("-", magnitude),
+        None => ("", text),
+    };
+    if digits.len() < 5 || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return text.to_owned();
+    }
+    let mut grouped = String::with_capacity(text.len() + digits.len() / 3);
+    grouped.push_str(sign);
+    for (index, digit) in digits.char_indices() {
+        if index > 0 && (digits.len() - index) % 3 == 0 {
+            grouped.push('_');
+        }
+        grouped.push(digit);
+    }
+    grouped
+}
+
 /// Render config fields with their env var keys for debugging/logging.
 ///
 /// Derive with `#[derive(ConfigDisplay)]` for automatic implementation.
@@ -735,6 +760,42 @@ mod tests {
             }
             if errors.is_empty() { Ok(()) } else { Err(Error::Validation { errors }) }
         }
+    }
+
+    #[test]
+    fn grouped_integer_text_leaves_four_digits_alone() {
+        assert_eq!(grouped_integer_text("8192"), "8192");
+        assert_eq!(grouped_integer_text("-8192"), "-8192");
+    }
+
+    #[test]
+    fn grouped_integer_text_groups_five_digits() {
+        assert_eq!(grouped_integer_text("65536"), "65_536");
+        assert_eq!(grouped_integer_text("-65536"), "-65_536");
+    }
+
+    #[test]
+    fn grouped_integer_text_groups_seven_digits_in_threes() {
+        assert_eq!(grouped_integer_text("1234567"), "1_234_567");
+        assert_eq!(grouped_integer_text("100000000"), "100_000_000");
+    }
+
+    #[test]
+    fn grouped_integer_text_groups_full_width_u64_max() {
+        assert_eq!(grouped_integer_text(&u64::MAX.to_string()), "18_446_744_073_709_551_615");
+    }
+
+    #[test]
+    fn grouped_integer_text_groups_i64_min() {
+        assert_eq!(grouped_integer_text(&i64::MIN.to_string()), "-9_223_372_036_854_775_808");
+    }
+
+    #[test]
+    fn grouped_integer_text_passes_non_integers_through() {
+        assert_eq!(grouped_integer_text("true"), "true");
+        assert_eq!(grouped_integer_text("1.5"), "1.5");
+        assert_eq!(grouped_integer_text("-"), "-");
+        assert_eq!(grouped_integer_text(""), "");
     }
 
     #[test]

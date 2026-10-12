@@ -830,7 +830,7 @@ fn gen_codegen_const(const_name: &str, field_name: &syn::Ident, field_type: &syn
         __out.push_str(": ");
         __out.push_str(#type_str);
         __out.push_str(" = ");
-        __out.push_str(&::std::format!("{}", self.#field_name));
+        __out.push_str(&::conflaguration::grouped_integer_text(&::std::format!("{}", self.#field_name)));
         __out.push_str(";\n");
     }
 }
