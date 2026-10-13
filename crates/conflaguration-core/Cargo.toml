@@ -2,6 +2,11 @@
 name = "conflaguration-core"
 version = "0.1.0"
 edition = "2024"
+description = "borrowed no-std settings core for conflaguration"
+license = "MIT"
+repository = "https://github.com/brianbruggeman/conflaguration"
+keywords = ["env", "settings", "config", "no-std", "configuration"]
+categories = ["config", "no-std"]
 
 [dev-dependencies]
 conflaguration = { path = "../..", features = ["derive", "json"] }
