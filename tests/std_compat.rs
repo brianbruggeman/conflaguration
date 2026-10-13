@@ -1,4 +1,5 @@
 #![cfg(any(feature = "default", feature = "std"))]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fmt;
 #[cfg(feature = "toml")]

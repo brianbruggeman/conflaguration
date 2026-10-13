@@ -624,8 +624,8 @@ fn builder_merge_2_toml_layers_incumbent_figment(bencher: divan::Bencher) {
     let layer_2 = write_temp(".toml", &merge_layer_toml(20));
     bencher.bench(|| {
         Figment::new()
-            .merge(Toml::file(layer_1.to_path_buf()))
-            .join(Toml::file(layer_2.to_path_buf()))
+            .merge(Toml::file(&layer_1))
+            .join(Toml::file(&layer_2))
             .extract::<MergeConfig>()
             .expect("figment 2-layer extract")
     });
