@@ -37,6 +37,13 @@ impl<'de> Deserialize<'de> for Tree {
     }
 }
 
+#[cfg(feature = "xml")]
+impl Tree {
+    pub(crate) fn into_value(self) -> Value {
+        self.0
+    }
+}
+
 struct TreeVisitor;
 
 impl<'de> Visitor<'de> for TreeVisitor {

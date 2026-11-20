@@ -3,6 +3,7 @@ use std::path::Path;
 use serde_value::Value;
 
 use crate::Result;
+use crate::lenient_de::Lenient;
 use crate::Settings;
 
 /// Deserialize from a TOML string.
@@ -105,9 +106,6 @@ pub fn from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
 
 // parse a config file into a format-neutral value, the medium used to overlay
 // one file's present keys onto an already-constructed config.
-// the xml, ron and json5 arms arrive with the lenient merge tree; until then
-// a build with only those features has no arm that reads `contents`.
-#[cfg_attr(not(any(feature = "toml", feature = "json", feature = "yaml")), allow(unused_variables))]
 fn file_to_value(path: &Path) -> Result<Value> {
     let contents = std::fs::read_to_string(path)?;
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");
@@ -130,6 +128,24 @@ fn file_to_value(path: &Path) -> Result<Value> {
 
         #[cfg(not(feature = "yaml"))]
         "yaml" | "yml" => Err(crate::Error::UnsupportedFormat("yaml (enable the 'yaml' feature)".into())),
+
+        #[cfg(feature = "xml")]
+        "xml" => Ok(quick_xml::de::from_str::<crate::Tree>(&contents)?.into_value()),
+
+        #[cfg(not(feature = "xml"))]
+        "xml" => Err(crate::Error::UnsupportedFormat("xml (enable the 'xml' feature)".into())),
+
+        #[cfg(feature = "ron")]
+        "ron" => Ok(ron::from_str(&contents)?),
+
+        #[cfg(not(feature = "ron"))]
+        "ron" => Err(crate::Error::UnsupportedFormat("ron (enable the 'ron' feature)".into())),
+
+        #[cfg(feature = "json5")]
+        "json5" => Ok(json5::from_str(&contents)?),
+
+        #[cfg(not(feature = "json5"))]
+        "json5" => Err(crate::Error::UnsupportedFormat("json5 (enable the 'json5' feature)".into())),
 
         other => Err(crate::Error::UnsupportedFormat(other.into())),
     }
@@ -189,7 +205,7 @@ where
     let mut base_value = serde_value::to_value(base)?;
     let file_value = file_to_value(path)?;
     merge_value(&mut base_value, file_value, mode);
-    Ok(T::deserialize(base_value)?)
+    Ok(T::deserialize(Lenient(base_value))?)
 }
 
 /// Combine an in-memory mapping's keys with an existing value per `mode`.
@@ -201,7 +217,7 @@ where
     let mut base_value = serde_value::to_value(base)?;
     let incoming_value = serde_value::to_value(incoming)?;
     merge_value(&mut base_value, incoming_value, mode);
-    Ok(T::deserialize(base_value)?)
+    Ok(T::deserialize(Lenient(base_value))?)
 }
 
 /// Load from file, then override with environment variables.

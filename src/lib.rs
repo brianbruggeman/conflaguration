@@ -274,6 +274,9 @@ pub use serde::de::DeserializeOwned;
 #[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
 mod file;
 
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+mod lenient_de;
+
 /// Load and deserialize a config file, detecting the format by lowercase
 /// extension (`.toml`, `.json`, `.yaml`, `.yml`, `.xml`, `.ron`, `.json5`). Other extensions are rejected.
 #[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]

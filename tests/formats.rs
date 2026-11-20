@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 
-use conflaguration::{Tree, from_file, from_json5_str, from_json_str, from_ron_str, from_toml_str, from_xml_str, from_yaml_str};
+use conflaguration::{ConfigBuilder, Error, Tree, from_file, from_json5_str, from_json_str, from_ron_str, from_toml_str, from_xml_str, from_yaml_str};
 
 #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Fixture {
@@ -21,6 +21,15 @@ struct Fixture {
 struct Inner {
     retries: u32,
     enabled: bool,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct Deep {
+    ports: Vec<u16>,
+    limit: Option<u32>,
+    weights: std::collections::BTreeMap<String, u32>,
+    note: String,
+    inner: Vec<Inner>,
 }
 
 fn expected_fixture() -> Fixture {
@@ -191,4 +200,175 @@ fn ctl_formats_tree_differs_from_quick_xml_value() {
     let incumbent = quick_xml::de::from_str::<serde_json::Value>(&text).expect("payload.xml should parse as json value");
     let grouped = tree_json(from_xml_str::<Tree>(&text));
     assert_ne!(grouped, incumbent, "the tree must differ from the incumbent reading");
+}
+
+fn check_error<T>(result: conflaguration::Result<T>, needle: &str) -> Result<(), String> {
+    match result {
+        Err(Error::ValueDeserialize(error)) if error.to_string().contains(needle) => Ok(()),
+        Err(error) => Err(format!("error does not match {needle:?}: {error}")),
+        Ok(_) => Err("load succeeded where an error was expected".to_string()),
+    }
+}
+
+fn base_fixture() -> Fixture {
+    Fixture {
+        name: "base".to_string(),
+        port: 1,
+        debug: false,
+        ratio: 0.0,
+        tags: vec![],
+        single: vec![],
+        inner: Inner { retries: 0, enabled: true },
+        absent: None,
+    }
+}
+
+fn base_deep() -> Deep {
+    Deep { ports: vec![], limit: None, weights: std::collections::BTreeMap::new(), note: "x".to_string(), inner: vec![] }
+}
+
+fn named_path(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats").join(name)
+}
+
+fn check_layered(extension: &str) {
+    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(fixture_path(extension)).build();
+    check_fixture(result, &expected_fixture()).expect("layered fixture should equal the expected value");
+}
+
+fn check_overlay(extension: &str) {
+    let result = ConfigBuilder::<Fixture>::new()
+        .value(expected_fixture())
+        .overlay_file(named_path(&format!("overlay.{extension}")))
+        .build();
+    let expected = Fixture { absent: Some("filled".to_string()), ..expected_fixture() };
+    check_fixture(result, &expected).expect("overlay should fill only the absent field");
+}
+
+#[test]
+fn format_layered_toml() {
+    check_layered("toml");
+}
+
+#[test]
+fn format_overlay_toml() {
+    check_overlay("toml");
+}
+
+#[test]
+fn format_layered_json() {
+    check_layered("json");
+}
+
+#[test]
+fn format_overlay_json() {
+    check_overlay("json");
+}
+
+#[test]
+fn format_layered_yaml() {
+    check_layered("yaml");
+}
+
+#[test]
+fn format_overlay_yaml() {
+    check_overlay("yaml");
+}
+
+#[test]
+fn format_layered_xml() {
+    check_layered("xml");
+}
+
+#[test]
+fn format_overlay_xml() {
+    check_overlay("xml");
+}
+
+#[test]
+fn format_layered_ron() {
+    check_layered("ron");
+}
+
+#[test]
+fn format_overlay_ron() {
+    check_overlay("ron");
+}
+
+#[test]
+fn format_layered_json5() {
+    check_layered("json5");
+}
+
+#[test]
+fn format_overlay_json5() {
+    check_overlay("json5");
+}
+
+fn quoted_expected() -> Fixture {
+    Fixture { port: 8080, debug: true, ratio: 0.5, single: vec!["only".to_string()], ..base_fixture() }
+}
+
+#[test]
+fn format_lenient_quoted_scalars() {
+    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(named_path("quoted.toml")).build();
+    check_fixture(result, &quoted_expected()).expect("quoted scalars should be parsed");
+}
+
+#[test]
+fn format_lenient_bad_number() {
+    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(named_path("bad_port.toml")).build();
+    check_error(result, "eighty").expect("an unparsable port should fail naming its text");
+}
+
+#[test]
+fn format_lenient_typed_layer() {
+    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(named_path("typed.toml")).build();
+    check_fixture(result, &quoted_expected()).expect("typed values should be untouched");
+}
+
+#[test]
+fn format_lenient_empty_elements() {
+    let result = ConfigBuilder::<Fixture>::new().value(expected_fixture()).file(named_path("empties.xml")).build();
+    let expected = Fixture { tags: vec![], absent: None, ..expected_fixture() };
+    check_fixture(result, &expected).expect("empty elements should become an empty list and none");
+}
+
+fn check_deep(layer: &str, expected: Deep) {
+    let result = ConfigBuilder::<Deep>::new().value(base_deep()).file(named_path(layer)).build();
+    check_fixture(result, &expected).expect("deep layer should load into the expected value");
+}
+
+#[test]
+fn format_lenient_deep_list() {
+    let expected = Deep { ports: vec![1, 2], inner: vec![Inner { retries: 3, enabled: false }], ..base_deep() };
+    check_deep("deep_list.xml", expected);
+}
+
+#[test]
+fn format_lenient_deep_option() {
+    check_deep("deep_option.xml", Deep { limit: Some(7), ..base_deep() });
+}
+
+#[test]
+fn format_lenient_deep_map() {
+    let weights = std::collections::BTreeMap::from([("a".to_string(), 1), ("b".to_string(), 2)]);
+    check_deep("deep_map.xml", Deep { weights, ..base_deep() });
+}
+
+#[test]
+fn format_lenient_deep_empty() {
+    check_deep("deep_empty.xml", Deep { note: String::new(), ..base_deep() });
+}
+
+#[test]
+fn ctl_formats_check_error_accepts_matching() {
+    let failure: conflaguration::Result<Fixture> = Err(Error::ValueDeserialize(serde_value::DeserializerError::Custom("invalid value \"eighty\"".to_string())));
+    check_error(failure, "eighty").expect("a matching value error should be accepted");
+}
+
+#[test]
+fn ctl_formats_check_error_rejects_success() {
+    let result = check_error(Ok(base_fixture()), "eighty");
+    assert!(result.is_err(), "a successful load must be rejected");
 }
