@@ -1,3 +1,4 @@
+#![cfg(any(feature = "xml", feature = "ron", feature = "json5"))]
 use std::path::PathBuf;
 
 use conflaguration::from_file;
