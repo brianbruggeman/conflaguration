@@ -1,0 +1,8 @@
+method: tools/call
+id: 1
+ratio: 0.5
+ok: true
+args:
+  id:
+    - A
+    - B
