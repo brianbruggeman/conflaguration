@@ -23,7 +23,40 @@ pub fn from_yaml_str<T: serde::de::DeserializeOwned>(contents: &str) -> Result<T
     Ok(serde_yaml::from_str(contents)?)
 }
 
-/// Load config from a file, detecting format by lowercase extension (`.toml`, `.json`, `.yaml`, `.yml`).
+/// Deserialize from an XML string. Element text becomes the typed field and
+/// repeated sibling elements fill a `Vec` field.
+///
+/// ```rust
+/// #[derive(Debug, PartialEq, serde::Deserialize)]
+/// struct Config {
+///     port: u16,
+///     tags: Vec<String>,
+/// }
+///
+/// let config: Config = conflaguration::from_xml_str(
+///     "<config><port>8080</port><tags>a</tags><tags>b</tags></config>",
+/// )?;
+/// assert_eq!(config, Config { port: 8080, tags: vec!["a".to_string(), "b".to_string()] });
+/// # Ok::<(), conflaguration::Error>(())
+/// ```
+#[cfg(feature = "xml")]
+pub fn from_xml_str<T: serde::de::DeserializeOwned>(contents: &str) -> Result<T> {
+    Ok(quick_xml::de::from_str(contents)?)
+}
+
+/// Deserialize from a RON string.
+#[cfg(feature = "ron")]
+pub fn from_ron_str<T: serde::de::DeserializeOwned>(contents: &str) -> Result<T> {
+    Ok(ron::from_str(contents)?)
+}
+
+/// Deserialize from a JSON5 string.
+#[cfg(feature = "json5")]
+pub fn from_json5_str<T: serde::de::DeserializeOwned>(contents: &str) -> Result<T> {
+    Ok(json5::from_str(contents)?)
+}
+
+/// Load config from a file, detecting format by lowercase extension (`.toml`, `.json`, `.yaml`, `.yml`, `.xml`, `.ron`, `.json5`).
 /// Uppercase or mixed-case extensions are rejected as unsupported.
 pub fn from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     let contents = std::fs::read_to_string(path)?;
@@ -48,12 +81,33 @@ pub fn from_file<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
         #[cfg(not(feature = "yaml"))]
         "yaml" | "yml" => Err(crate::Error::UnsupportedFormat("yaml (enable the 'yaml' feature)".into())),
 
+        #[cfg(feature = "xml")]
+        "xml" => from_xml_str(&contents),
+
+        #[cfg(not(feature = "xml"))]
+        "xml" => Err(crate::Error::UnsupportedFormat("xml (enable the 'xml' feature)".into())),
+
+        #[cfg(feature = "ron")]
+        "ron" => from_ron_str(&contents),
+
+        #[cfg(not(feature = "ron"))]
+        "ron" => Err(crate::Error::UnsupportedFormat("ron (enable the 'ron' feature)".into())),
+
+        #[cfg(feature = "json5")]
+        "json5" => from_json5_str(&contents),
+
+        #[cfg(not(feature = "json5"))]
+        "json5" => Err(crate::Error::UnsupportedFormat("json5 (enable the 'json5' feature)".into())),
+
         other => Err(crate::Error::UnsupportedFormat(other.into())),
     }
 }
 
 // parse a config file into a format-neutral value, the medium used to overlay
 // one file's present keys onto an already-constructed config.
+// the xml, ron and json5 arms arrive with the lenient merge tree; until then
+// a build with only those features has no arm that reads `contents`.
+#[cfg_attr(not(any(feature = "toml", feature = "json", feature = "yaml")), allow(unused_variables))]
 fn file_to_value(path: &Path) -> Result<Value> {
     let contents = std::fs::read_to_string(path)?;
     let extension = path.extension().and_then(|ext| ext.to_str()).unwrap_or("");

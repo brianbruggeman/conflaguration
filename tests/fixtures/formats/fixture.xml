@@ -1,0 +1,1 @@
+<config><name>review</name><port>8080</port><debug>true</debug><ratio>0.5</ratio><tags>a</tags><tags>b</tags><tags>c</tags><single>only</single><inner><retries>3</retries><enabled>false</enabled></inner></config>

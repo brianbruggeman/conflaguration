@@ -146,13 +146,13 @@ impl<T> ConfigBuilder<T> {
     }
 }
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml")))]
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
 impl<T> ConfigBuilder<T>
 where
     T: serde::de::DeserializeOwned + serde::Serialize,
 {
     /// Apply a config file, **overriding** existing keys and inserting new ones.
-    /// Format detected by lowercase extension (`.toml`, `.json`, `.yaml`, `.yml`).
+    /// Format detected by lowercase extension (`.toml`, `.json`, `.yaml`, `.yml`, `.xml`, `.ron`, `.json5`).
     /// As the first source it deserializes the file in full.
     pub fn file(self, path: impl AsRef<std::path::Path>) -> Self {
         self.merge_from_file(path.as_ref(), crate::file::MergeMode::Override)
