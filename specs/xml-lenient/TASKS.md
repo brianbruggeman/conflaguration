@@ -16,7 +16,7 @@ note IN THE SAME COMMIT as the slice. Every cargo command runs as `timeout -k 30
 ## resume
 
 Last landed slice: 0b (green baseline on local main `beded1a`)
-Next action: audit round 5
+Next action: slice 1 (CONFLAG-3)
 Open question, if any: none
 
 ## struck

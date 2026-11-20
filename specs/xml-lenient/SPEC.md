@@ -1,7 +1,8 @@
 # xml-lenient -- XML (and RON, JSON5) for conflaguration, typed
 
-status: draft, round 5 (rounds 1-4 REFUSE 13, 7, 3, 1 reasons; each amended. Round 5 also adds
-R5's TOML-datetime and non-finite-float rules and R8, both from proxima's census for PROXIMA-50)
+status: audited -- ADMIT by spec-auditor round 5, 2026-11-20 (rounds 1-4 REFUSE 13, 7, 3, 1
+reasons; each amended. Round 5 also added R5's TOML-datetime and non-finite-float rules and R8, both
+from proxima's census for PROXIMA-50)
 owner: brian
 created: 2026-11-20
 
