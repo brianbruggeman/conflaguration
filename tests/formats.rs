@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 
-use conflaguration::{ConfigBuilder, Error, Tree, from_file, from_json5_str, from_json_str, from_ron_str, from_toml_str, from_xml_str, from_yaml_str};
+use conflaguration::{ConfigBuilder, Error, Tree, from_file, from_tree, from_json5_str, from_json_str, from_ron_str, from_toml_str, from_xml_str, from_yaml_str};
 
 #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Fixture {
@@ -30,6 +30,33 @@ struct Deep {
     weights: std::collections::BTreeMap<String, u32>,
     note: String,
     inner: Vec<Inner>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct Holder {
+    step: Step,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "kind")]
+enum Step {
+    Wait { ms: u32 },
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct Helped {
+    step: HelpedStep,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+#[serde(tag = "kind")]
+enum HelpedStep {
+    Wait {
+        #[serde(deserialize_with = "conflaguration::lenient::deserialize")]
+        ms: u32,
+        #[serde(default, deserialize_with = "conflaguration::lenient::option")]
+        cap: Option<u64>,
+    },
 }
 
 fn expected_fixture() -> Fixture {
@@ -371,4 +398,101 @@ fn ctl_formats_check_error_accepts_matching() {
 fn ctl_formats_check_error_rejects_success() {
     let result = check_error(Ok(base_fixture()), "eighty");
     assert!(result.is_err(), "a successful load must be rejected");
+}
+
+fn check_tree(tree: Tree) {
+    check_fixture(from_tree::<Fixture>(tree), &expected_fixture()).expect("tree should load into the expected value");
+}
+
+fn tree_of(extension: &str) -> Tree {
+    let text = read_fixture(&format!("fixture.{extension}"));
+    let parsed = match extension {
+        "toml" => from_toml_str::<Tree>(&text),
+        "json" => from_json_str::<Tree>(&text),
+        "yaml" => from_yaml_str::<Tree>(&text),
+        "xml" => from_xml_str::<Tree>(&text),
+        "ron" => from_ron_str::<Tree>(&text),
+        _ => from_json5_str::<Tree>(&text),
+    };
+    parsed.expect("fixture should parse as a tree")
+}
+
+#[test]
+fn format_from_tree_toml() {
+    check_tree(tree_of("toml"));
+}
+
+#[test]
+fn format_from_tree_json() {
+    check_tree(tree_of("json"));
+}
+
+#[test]
+fn format_from_tree_yaml() {
+    check_tree(tree_of("yaml"));
+}
+
+#[test]
+fn format_from_tree_xml() {
+    check_tree(tree_of("xml"));
+}
+
+#[test]
+fn format_from_tree_ron() {
+    check_tree(tree_of("ron"));
+}
+
+#[test]
+fn format_from_tree_json5() {
+    check_tree(tree_of("json5"));
+}
+
+#[test]
+fn format_from_tree_json_value() {
+    let parsed: serde_json::Value = serde_json::from_str(&read_fixture("fixture.json")).expect("fixture.json should be valid json");
+    let tree = serde_json::from_value::<Tree>(parsed).expect("a json value should read as a tree");
+    check_tree(tree);
+}
+
+#[test]
+fn format_from_tree_bad_number() {
+    let text = read_fixture("fixture.xml").replace("<port>8080</port>", "<port>eighty</port>");
+    let tree = from_xml_str::<Tree>(&text).expect("the xml should parse as a tree");
+    check_error(from_tree::<Fixture>(tree), "eighty").expect("an unparsable port should fail naming its text");
+}
+
+fn base_holder() -> Holder {
+    Holder { step: Step::Wait { ms: 1 } }
+}
+
+fn base_helped() -> Helped {
+    Helped { step: HelpedStep::Wait { ms: 1, cap: None } }
+}
+
+#[test]
+fn format_limit_tagged_text() {
+    let result = ConfigBuilder::<Holder>::new().value(base_holder()).file(named_path("tagged.xml")).build();
+    check_error(result, "").expect("a tagged enum field should not be coerced from xml text");
+}
+
+fn helped_expected() -> Helped {
+    Helped { step: HelpedStep::Wait { ms: 5, cap: Some(9) } }
+}
+
+#[test]
+fn format_helper_xml() {
+    let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped.xml")).build();
+    check_fixture(result, &helped_expected()).expect("the helpers should read xml text");
+}
+
+#[test]
+fn format_helper_toml() {
+    let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped.toml")).build();
+    check_fixture(result, &helped_expected()).expect("the helpers should read typed toml");
+}
+
+#[test]
+fn format_helper_bad_text() {
+    let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped_bad.xml")).build();
+    check_error(result, "five").expect("an unparsable ms should fail naming its text");
 }

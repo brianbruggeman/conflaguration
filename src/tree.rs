@@ -4,6 +4,8 @@ use std::fmt;
 use serde::de::{Deserialize, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde_value::Value;
 
+use crate::lenient_de::Lenient;
+
 #[cfg(feature = "json")]
 use serde_json::{Number, Value as Json};
 
@@ -183,5 +185,11 @@ fn to_json(value: Value) -> serde_json::Value {
                 .collect(),
         ),
         Value::Bytes(bytes) => Json::Array(bytes.into_iter().map(Json::from).collect()),
+    }
+}
+
+impl Tree {
+    pub(crate) fn into_lenient(self) -> Lenient {
+        Lenient(self.0)
     }
 }

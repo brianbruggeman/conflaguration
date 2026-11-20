@@ -1235,3 +1235,9 @@ mod tree;
 
 #[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
 pub use tree::Tree;
+
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+pub mod lenient;
+
+#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+pub use file::from_tree;

@@ -5,6 +5,7 @@ use serde_value::Value;
 use crate::Result;
 use crate::lenient_de::Lenient;
 use crate::Settings;
+use crate::Tree;
 
 /// Deserialize from a TOML string.
 #[cfg(feature = "toml")]
@@ -237,4 +238,29 @@ where
     config.override_from_env()?;
     apply(&mut config);
     Ok(config)
+}
+
+/// Deserialize a parsed [`Tree`] into `T`, reading text where a bool, number,
+/// list or option is wanted, as the file loaders do.
+///
+/// ```rust
+/// # #[cfg(feature = "xml")]
+/// # fn main() -> Result<(), conflaguration::Error> {
+/// use conflaguration::{Tree, from_tree, from_xml_str};
+///
+/// #[derive(serde::Deserialize)]
+/// struct Settings {
+///     port: u16,
+/// }
+///
+/// let tree: Tree = from_xml_str("<settings><port>8080</port></settings>")?;
+/// let settings: Settings = from_tree(tree)?;
+/// assert_eq!(settings.port, 8080);
+/// # Ok(())
+/// # }
+/// # #[cfg(not(feature = "xml"))]
+/// # fn main() {}
+/// ```
+pub fn from_tree<T: serde::de::DeserializeOwned>(tree: Tree) -> Result<T> {
+    Ok(T::deserialize(tree.into_lenient())?)
 }
