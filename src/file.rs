@@ -41,9 +41,19 @@ pub fn from_yaml_str<T: serde::de::DeserializeOwned>(contents: &str) -> Result<T
 /// assert_eq!(config, Config { port: 8080, tags: vec!["a".to_string(), "b".to_string()] });
 /// # Ok::<(), conflaguration::Error>(())
 /// ```
+///
+/// For `T = Tree` an empty element stays an empty map; `tree_from_xml_str` reads it as `Unit`.
 #[cfg(feature = "xml")]
 pub fn from_xml_str<T: serde::de::DeserializeOwned>(contents: &str) -> Result<T> {
     Ok(quick_xml::de::from_str(contents)?)
+}
+
+/// Parse an XML string into a [`Tree`] that reads every empty element as `Unit`, so
+/// it can be told from a real empty map.
+#[cfg(feature = "xml")]
+pub fn tree_from_xml_str(text: &str) -> Result<Tree> {
+    let tree: Tree = quick_xml::de::from_str(text)?;
+    Ok(tree.empties_to_unit())
 }
 
 /// Deserialize from a RON string.
@@ -131,7 +141,7 @@ fn file_to_value(path: &Path) -> Result<Value> {
         "yaml" | "yml" => Err(crate::Error::UnsupportedFormat("yaml (enable the 'yaml' feature)".into())),
 
         #[cfg(feature = "xml")]
-        "xml" => Ok(quick_xml::de::from_str::<crate::Tree>(&contents)?.into_value()),
+        "xml" => Ok(tree_from_xml_str(&contents)?.into_value()),
 
         #[cfg(not(feature = "xml"))]
         "xml" => Err(crate::Error::UnsupportedFormat("xml (enable the 'xml' feature)".into())),
@@ -177,6 +187,7 @@ fn merge_value(base: &mut Value, incoming: Value, mode: MergeMode) {
                 merge_value(base_map.entry(key).or_insert(Value::Unit), value, mode);
             }
         }
+        (Value::Map(_), Value::Unit) => {}
         (base_slot, incoming) => match mode {
             MergeMode::Override => *base_slot = incoming,
             MergeMode::Overlay => {

@@ -299,6 +299,9 @@ pub use file::from_yaml_str;
 /// Deserialize a config value from an XML string.
 #[cfg(all(any(feature = "default", feature = "std"), feature = "xml"))]
 pub use file::from_xml_str;
+/// Parse an XML string into a `Tree` that reads empty elements as `Unit`.
+#[cfg(all(any(feature = "default", feature = "std"), feature = "xml"))]
+pub use file::tree_from_xml_str;
 /// Deserialize a config value from a RON string.
 #[cfg(all(any(feature = "default", feature = "std"), feature = "ron"))]
 pub use file::from_ron_str;

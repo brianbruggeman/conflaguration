@@ -44,6 +44,20 @@ impl Tree {
     pub(crate) fn into_value(self) -> Value {
         self.0
     }
+
+    pub(crate) fn empties_to_unit(self) -> Tree {
+        Tree(empties_to_unit(self.0))
+    }
+}
+
+#[cfg(feature = "xml")]
+fn empties_to_unit(value: Value) -> Value {
+    match value {
+        Value::Map(entries) if entries.is_empty() => Value::Unit,
+        Value::Map(entries) => Value::Map(entries.into_iter().map(|(key, inner)| (key, empties_to_unit(inner))).collect()),
+        Value::Seq(items) => Value::Seq(items.into_iter().map(empties_to_unit).collect()),
+        other => other,
+    }
 }
 
 struct TreeVisitor;

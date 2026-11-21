@@ -496,3 +496,129 @@ fn format_helper_bad_text() {
     let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped_bad.xml")).build();
     check_error(result, "five").expect("an unparsable ms should fail naming its text");
 }
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize, Default)]
+#[serde(default)]
+struct Def {
+    data_path: String,
+    n: u32,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct Req {
+    data_path: String,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct OptDef {
+    capture: Option<Def>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct OptReq {
+    capture: Option<Req>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct OptVal {
+    capture: Option<serde_json::Value>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct Fields {
+    s: String,
+    v: Vec<String>,
+    d: Def,
+    m: std::collections::BTreeMap<String, u32>,
+}
+
+const EMPTY_FORMS: [&str; 3] = [
+    "<config><capture/></config>",
+    "<config><capture></capture></config>",
+    "<config><capture>  </capture></config>",
+];
+
+fn xml_tree(text: &str) -> conflaguration::Result<Tree> {
+    conflaguration::tree_from_xml_str(text)
+}
+
+fn check_empty_form(text: &str) -> Result<(), String> {
+    let tree = xml_tree(text).map_err(|error| error.to_string())?;
+    check_json(serde_json::Value::from(tree.clone()), &serde_json::json!({"capture": null}))?;
+    check_fixture(from_tree::<OptDef>(tree.clone()), &OptDef { capture: None })?;
+    check_fixture(from_tree::<OptReq>(tree.clone()), &OptReq { capture: None })?;
+    check_fixture(from_tree::<OptVal>(tree), &OptVal { capture: None })
+}
+
+#[test]
+fn format_empty_xml_selfclosing() {
+    check_empty_form(EMPTY_FORMS[0]).expect("a self-closing element should read as unit");
+}
+
+#[test]
+fn format_empty_xml_open_close() {
+    check_empty_form(EMPTY_FORMS[1]).expect("an open-close pair should read as unit");
+}
+
+#[test]
+fn format_empty_xml_whitespace() {
+    check_empty_form(EMPTY_FORMS[2]).expect("a whitespace-only element should read as unit");
+}
+
+#[test]
+fn format_empty_xml_plain_fields() {
+    let tree = xml_tree("<config><s/><v/><d/><m/></config>").expect("empty elements should parse");
+    let expected = Fields { s: String::new(), v: vec![], d: Def::default(), m: std::collections::BTreeMap::new() };
+    check_fixture(from_tree::<Fields>(tree), &expected).expect("unit should read as empty for each plain type");
+}
+
+#[test]
+fn format_empty_xml_root() {
+    let tree = xml_tree("<config/>").expect("an empty root should parse");
+    check_fixture(from_tree::<Def>(tree), &Def::default()).expect("an empty root should read as the default struct");
+}
+
+#[test]
+fn format_empty_xml_roundtrip() {
+    let tree = xml_tree(EMPTY_FORMS[0]).expect("an empty element should parse");
+    let json = serde_json::Value::from(tree);
+    let again = serde_json::from_value::<Tree>(json).expect("the json should re-enter as a tree");
+    check_json(serde_json::Value::from(again.clone()), &serde_json::json!({"capture": null})).expect("unit should survive the round trip");
+    check_fixture(from_tree::<OptDef>(again), &OptDef { capture: None }).expect("the round-tripped tree should read as none");
+}
+
+#[test]
+fn format_empty_xml_repeated() {
+    let actual = tree_json(xml_tree("<config><a/><a/></config>"));
+    check_json(actual, &serde_json::json!({"a": [null, null]})).expect("repeated empty siblings should be a list of unit");
+}
+
+#[test]
+fn format_empty_xml_from_str_keeps_map() {
+    let actual = tree_json(from_xml_str::<Tree>("<config><capture/></config>"));
+    check_json(actual, &serde_json::json!({"capture": {}})).expect("from_xml_str should keep the empty map");
+}
+
+#[test]
+fn format_empty_layer_xml_option() {
+    let base = OptDef { capture: None };
+    let result = ConfigBuilder::<OptDef>::new().value(base).file(named_path("empty_capture.xml")).build();
+    check_fixture(result, &OptDef { capture: None }).expect("an empty element layer should leave the option none");
+}
+
+fn check_keeps_base(layer: &str) {
+    let override_result = ConfigBuilder::<Fixture>::new().value(expected_fixture()).file(named_path(layer)).build();
+    check_fixture(override_result, &expected_fixture()).expect("an override layer of unit should keep the base");
+    let overlay_result = ConfigBuilder::<Fixture>::new().value(expected_fixture()).overlay_file(named_path(layer)).build();
+    check_fixture(overlay_result, &expected_fixture()).expect("an overlay layer of unit should keep the base");
+}
+
+#[test]
+fn format_empty_layer_xml_keeps_base() {
+    check_keeps_base("empty_inner.xml");
+}
+
+#[test]
+fn format_empty_layer_json_null_keeps_base() {
+    check_keeps_base("empty_inner_null.json");
+}

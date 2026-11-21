@@ -54,6 +54,15 @@ impl<'de> IntoDeserializer<'de, DeserializerError> for Lenient {
     }
 }
 
+impl Lenient {
+    fn deserialize_keyed<'de, V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, DeserializerError> {
+        match self.0 {
+            Value::Unit => visitor.visit_map(MapDeserializer::<_, DeserializerError>::new(iter::empty::<(Lenient, Lenient)>())),
+            _ => self.deserialize_any(visitor),
+        }
+    }
+}
+
 impl<'de> Deserializer<'de> for Lenient {
     type Error = DeserializerError;
 
@@ -107,7 +116,7 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if is_empty_map(&self.0) {
+        if is_empty_map(&self.0) || matches!(self.0, Value::Unit) {
             return visitor.visit_string(String::new());
         }
         self.deserialize_any(visitor)
@@ -148,7 +157,7 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if is_empty_map(&self.0) {
+        if is_empty_map(&self.0) || matches!(self.0, Value::Unit) {
             return visitor.visit_seq(SeqDeserializer::<_, DeserializerError>::new(iter::empty::<Lenient>()));
         }
         match self.0 {
@@ -166,11 +175,11 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.deserialize_any(visitor)
+        self.deserialize_keyed(visitor)
     }
 
     fn deserialize_struct<V: Visitor<'de>>(self, _name: &'static str, _fields: &'static [&'static str], visitor: V) -> Result<V::Value, Self::Error> {
-        self.deserialize_any(visitor)
+        self.deserialize_keyed(visitor)
     }
 
     fn deserialize_enum<V: Visitor<'de>>(self, _name: &'static str, _variants: &'static [&'static str], visitor: V) -> Result<V::Value, Self::Error> {
