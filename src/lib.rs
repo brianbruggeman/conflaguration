@@ -268,46 +268,64 @@ pub use conflaguration_derive::Validate;
 pub use conflaguration_derive::ConfigCodegen;
 
 /// Re-exported so generated and downstream code can name the file-loader bound.
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub use serde::de::DeserializeOwned;
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 mod file;
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 mod lenient_de;
 
 /// Load and deserialize a config file, detecting the format by lowercase
 /// extension (`.toml`, `.json`, `.yaml`, `.yml`, `.xml`, `.ron`, `.json5`). Other extensions are rejected.
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub use file::from_file;
 /// Load from a file, then overlay environment variables on top.
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub use file::from_file_then_env;
 /// Load from a file, overlay env, then apply a final mutation (e.g. CLI flags).
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub use file::from_file_then_env_then;
 /// Deserialize a config value from a JSON string.
 #[cfg(all(any(feature = "default", feature = "std"), feature = "json"))]
 pub use file::from_json_str;
-/// Deserialize a config value from a TOML string.
-#[cfg(all(any(feature = "default", feature = "std"), feature = "toml"))]
-pub use file::from_toml_str;
-/// Deserialize a config value from a YAML string.
-#[cfg(all(any(feature = "default", feature = "std"), feature = "yaml"))]
-pub use file::from_yaml_str;
-/// Deserialize a config value from an XML string.
-#[cfg(all(any(feature = "default", feature = "std"), feature = "xml"))]
-pub use file::from_xml_str;
-/// Parse an XML string into a `Tree` that reads empty elements as `Unit`.
-#[cfg(all(any(feature = "default", feature = "std"), feature = "xml"))]
-pub use file::tree_from_xml_str;
-/// Deserialize a config value from a RON string.
-#[cfg(all(any(feature = "default", feature = "std"), feature = "ron"))]
-pub use file::from_ron_str;
 /// Deserialize a config value from a JSON5 string.
 #[cfg(all(any(feature = "default", feature = "std"), feature = "json5"))]
 pub use file::from_json5_str;
+/// Deserialize a config value from a RON string.
+#[cfg(all(any(feature = "default", feature = "std"), feature = "ron"))]
+pub use file::from_ron_str;
+/// Deserialize a config value from a TOML string.
+#[cfg(all(any(feature = "default", feature = "std"), feature = "toml"))]
+pub use file::from_toml_str;
+/// Deserialize a config value from an XML string.
+#[cfg(all(any(feature = "default", feature = "std"), feature = "xml"))]
+pub use file::from_xml_str;
+/// Deserialize a config value from a YAML string.
+#[cfg(all(any(feature = "default", feature = "std"), feature = "yaml"))]
+pub use file::from_yaml_str;
+/// Parse an XML string into a `Tree` that reads empty elements as `Unit`.
+#[cfg(all(any(feature = "default", feature = "std"), feature = "xml"))]
+pub use file::tree_from_xml_str;
 
 /// Crate-level result type.
 #[cfg(any(feature = "default", feature = "std"))]
@@ -1233,14 +1251,26 @@ mod tests {
     }
 }
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 mod tree;
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub use tree::Tree;
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub mod lenient;
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 pub use file::from_tree;

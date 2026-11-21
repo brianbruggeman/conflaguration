@@ -146,7 +146,10 @@ impl<T> ConfigBuilder<T> {
     }
 }
 
-#[cfg(all(any(feature = "default", feature = "std"), any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")))]
+#[cfg(all(
+    any(feature = "default", feature = "std"),
+    any(feature = "toml", feature = "json", feature = "yaml", feature = "xml", feature = "ron", feature = "json5")
+))]
 impl<T> ConfigBuilder<T>
 where
     T: serde::de::DeserializeOwned + serde::Serialize,

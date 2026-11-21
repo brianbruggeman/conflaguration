@@ -3,9 +3,9 @@ use std::path::Path;
 use serde_value::Value;
 
 use crate::Result;
-use crate::lenient_de::Lenient;
 use crate::Settings;
 use crate::Tree;
+use crate::lenient_de::Lenient;
 
 /// Deserialize from a TOML string.
 #[cfg(feature = "toml")]

@@ -3,7 +3,7 @@
 use std::fmt::Debug;
 use std::path::PathBuf;
 
-use conflaguration::{ConfigBuilder, Error, Tree, from_file, from_tree, from_json5_str, from_json_str, from_ron_str, from_toml_str, from_xml_str, from_yaml_str};
+use conflaguration::{ConfigBuilder, Error, Tree, from_file, from_json_str, from_json5_str, from_ron_str, from_toml_str, from_tree, from_xml_str, from_yaml_str};
 
 #[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
 struct Fixture {
@@ -146,7 +146,9 @@ fn json_of(text: &str) -> serde_json::Value {
 }
 
 fn read_fixture(name: &str) -> String {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats").join(name);
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/formats")
+        .join(name);
     std::fs::read_to_string(&path).expect("fixture file should be readable")
 }
 
@@ -251,15 +253,26 @@ fn base_fixture() -> Fixture {
 }
 
 fn base_deep() -> Deep {
-    Deep { ports: vec![], limit: None, weights: std::collections::BTreeMap::new(), note: "x".to_string(), inner: vec![] }
+    Deep {
+        ports: vec![],
+        limit: None,
+        weights: std::collections::BTreeMap::new(),
+        note: "x".to_string(),
+        inner: vec![],
+    }
 }
 
 fn named_path(name: &str) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/formats").join(name)
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/formats")
+        .join(name)
 }
 
 fn check_layered(extension: &str) {
-    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(fixture_path(extension)).build();
+    let result = ConfigBuilder::<Fixture>::new()
+        .value(base_fixture())
+        .file(fixture_path(extension))
+        .build();
     check_fixture(result, &expected_fixture()).expect("layered fixture should equal the expected value");
 }
 
@@ -268,7 +281,10 @@ fn check_overlay(extension: &str) {
         .value(expected_fixture())
         .overlay_file(named_path(&format!("overlay.{extension}")))
         .build();
-    let expected = Fixture { absent: Some("filled".to_string()), ..expected_fixture() };
+    let expected = Fixture {
+        absent: Some("filled".to_string()),
+        ..expected_fixture()
+    };
     check_fixture(result, &expected).expect("overlay should fill only the absent field");
 }
 
@@ -333,31 +349,53 @@ fn format_overlay_json5() {
 }
 
 fn quoted_expected() -> Fixture {
-    Fixture { port: 8080, debug: true, ratio: 0.5, single: vec!["only".to_string()], ..base_fixture() }
+    Fixture {
+        port: 8080,
+        debug: true,
+        ratio: 0.5,
+        single: vec!["only".to_string()],
+        ..base_fixture()
+    }
 }
 
 #[test]
 fn format_lenient_quoted_scalars() {
-    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(named_path("quoted.toml")).build();
+    let result = ConfigBuilder::<Fixture>::new()
+        .value(base_fixture())
+        .file(named_path("quoted.toml"))
+        .build();
     check_fixture(result, &quoted_expected()).expect("quoted scalars should be parsed");
 }
 
 #[test]
 fn format_lenient_bad_number() {
-    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(named_path("bad_port.toml")).build();
+    let result = ConfigBuilder::<Fixture>::new()
+        .value(base_fixture())
+        .file(named_path("bad_port.toml"))
+        .build();
     check_error(result, "eighty").expect("an unparsable port should fail naming its text");
 }
 
 #[test]
 fn format_lenient_typed_layer() {
-    let result = ConfigBuilder::<Fixture>::new().value(base_fixture()).file(named_path("typed.toml")).build();
+    let result = ConfigBuilder::<Fixture>::new()
+        .value(base_fixture())
+        .file(named_path("typed.toml"))
+        .build();
     check_fixture(result, &quoted_expected()).expect("typed values should be untouched");
 }
 
 #[test]
 fn format_lenient_empty_elements() {
-    let result = ConfigBuilder::<Fixture>::new().value(expected_fixture()).file(named_path("empties.xml")).build();
-    let expected = Fixture { tags: vec![], absent: None, ..expected_fixture() };
+    let result = ConfigBuilder::<Fixture>::new()
+        .value(expected_fixture())
+        .file(named_path("empties.xml"))
+        .build();
+    let expected = Fixture {
+        tags: vec![],
+        absent: None,
+        ..expected_fixture()
+    };
     check_fixture(result, &expected).expect("empty elements should become an empty list and none");
 }
 
@@ -368,7 +406,11 @@ fn check_deep(layer: &str, expected: Deep) {
 
 #[test]
 fn format_lenient_deep_list() {
-    let expected = Deep { ports: vec![1, 2], inner: vec![Inner { retries: 3, enabled: false }], ..base_deep() };
+    let expected = Deep {
+        ports: vec![1, 2],
+        inner: vec![Inner { retries: 3, enabled: false }],
+        ..base_deep()
+    };
     check_deep("deep_list.xml", expected);
 }
 
@@ -466,34 +508,50 @@ fn base_holder() -> Holder {
 }
 
 fn base_helped() -> Helped {
-    Helped { step: HelpedStep::Wait { ms: 1, cap: None } }
+    Helped {
+        step: HelpedStep::Wait { ms: 1, cap: None },
+    }
 }
 
 #[test]
 fn format_limit_tagged_text() {
-    let result = ConfigBuilder::<Holder>::new().value(base_holder()).file(named_path("tagged.xml")).build();
+    let result = ConfigBuilder::<Holder>::new()
+        .value(base_holder())
+        .file(named_path("tagged.xml"))
+        .build();
     check_error(result, "").expect("a tagged enum field should not be coerced from xml text");
 }
 
 fn helped_expected() -> Helped {
-    Helped { step: HelpedStep::Wait { ms: 5, cap: Some(9) } }
+    Helped {
+        step: HelpedStep::Wait { ms: 5, cap: Some(9) },
+    }
 }
 
 #[test]
 fn format_helper_xml() {
-    let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped.xml")).build();
+    let result = ConfigBuilder::<Helped>::new()
+        .value(base_helped())
+        .file(named_path("helped.xml"))
+        .build();
     check_fixture(result, &helped_expected()).expect("the helpers should read xml text");
 }
 
 #[test]
 fn format_helper_toml() {
-    let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped.toml")).build();
+    let result = ConfigBuilder::<Helped>::new()
+        .value(base_helped())
+        .file(named_path("helped.toml"))
+        .build();
     check_fixture(result, &helped_expected()).expect("the helpers should read typed toml");
 }
 
 #[test]
 fn format_helper_bad_text() {
-    let result = ConfigBuilder::<Helped>::new().value(base_helped()).file(named_path("helped_bad.xml")).build();
+    let result = ConfigBuilder::<Helped>::new()
+        .value(base_helped())
+        .file(named_path("helped_bad.xml"))
+        .build();
     check_error(result, "five").expect("an unparsable ms should fail naming its text");
 }
 
@@ -532,11 +590,7 @@ struct Fields {
     m: std::collections::BTreeMap<String, u32>,
 }
 
-const EMPTY_FORMS: [&str; 3] = [
-    "<config><capture/></config>",
-    "<config><capture></capture></config>",
-    "<config><capture>  </capture></config>",
-];
+const EMPTY_FORMS: [&str; 3] = ["<config><capture/></config>", "<config><capture></capture></config>", "<config><capture>  </capture></config>"];
 
 fn xml_tree(text: &str) -> conflaguration::Result<Tree> {
     conflaguration::tree_from_xml_str(text)
@@ -568,7 +622,12 @@ fn format_empty_xml_whitespace() {
 #[test]
 fn format_empty_xml_plain_fields() {
     let tree = xml_tree("<config><s/><v/><d/><m/></config>").expect("empty elements should parse");
-    let expected = Fields { s: String::new(), v: vec![], d: Def::default(), m: std::collections::BTreeMap::new() };
+    let expected = Fields {
+        s: String::new(),
+        v: vec![],
+        d: Def::default(),
+        m: std::collections::BTreeMap::new(),
+    };
     check_fixture(from_tree::<Fields>(tree), &expected).expect("unit should read as empty for each plain type");
 }
 
@@ -602,14 +661,23 @@ fn format_empty_xml_from_str_keeps_map() {
 #[test]
 fn format_empty_layer_xml_option() {
     let base = OptDef { capture: None };
-    let result = ConfigBuilder::<OptDef>::new().value(base).file(named_path("empty_capture.xml")).build();
+    let result = ConfigBuilder::<OptDef>::new()
+        .value(base)
+        .file(named_path("empty_capture.xml"))
+        .build();
     check_fixture(result, &OptDef { capture: None }).expect("an empty element layer should leave the option none");
 }
 
 fn check_keeps_base(layer: &str) {
-    let override_result = ConfigBuilder::<Fixture>::new().value(expected_fixture()).file(named_path(layer)).build();
+    let override_result = ConfigBuilder::<Fixture>::new()
+        .value(expected_fixture())
+        .file(named_path(layer))
+        .build();
     check_fixture(override_result, &expected_fixture()).expect("an override layer of unit should keep the base");
-    let overlay_result = ConfigBuilder::<Fixture>::new().value(expected_fixture()).overlay_file(named_path(layer)).build();
+    let overlay_result = ConfigBuilder::<Fixture>::new()
+        .value(expected_fixture())
+        .overlay_file(named_path(layer))
+        .build();
     check_fixture(overlay_result, &expected_fixture()).expect("an overlay layer of unit should keep the base");
 }
 
@@ -747,7 +815,11 @@ fn format_empty_json_vec_struct() {
 #[test]
 fn format_empty_null_non_option() {
     let json = serde_json::json!({"s": null, "v": null, "d": null});
-    let expected = NullFields { s: String::new(), v: vec![], d: Def::default() };
+    let expected = NullFields {
+        s: String::new(),
+        v: vec![],
+        d: Def::default(),
+    };
     check_read(tree_read::<NullFields>(&json), &expected).expect("null should read as empty for each plain type");
     check_err_has(serde_read::<NullFields>(&json), "invalid type: null").expect("serde_json rejects the nulls");
 }
@@ -755,14 +827,20 @@ fn format_empty_null_non_option() {
 #[test]
 fn format_empty_layer_toml_default() {
     let base = OptDef { capture: None };
-    let result = ConfigBuilder::<OptDef>::new().value(base).file(named_path("empty_capture.toml")).build();
+    let result = ConfigBuilder::<OptDef>::new()
+        .value(base)
+        .file(named_path("empty_capture.toml"))
+        .build();
     check_fixture(result, &OptDef { capture: Some(Def::default()) }).expect("an empty table layer should be some default");
 }
 
 #[test]
 fn format_empty_layer_toml_required() {
     let base = OptReq { capture: None };
-    let result = ConfigBuilder::<OptReq>::new().value(base).file(named_path("empty_capture.toml")).build();
+    let result = ConfigBuilder::<OptReq>::new()
+        .value(base)
+        .file(named_path("empty_capture.toml"))
+        .build();
     check_error(result, "data_path").expect("an empty table layer should miss the required field");
 }
 

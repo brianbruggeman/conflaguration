@@ -13,7 +13,8 @@ fn parse<T: FromStr, E: Error>(text: &str) -> Result<T, E>
 where
     T::Err: Display,
 {
-    text.parse::<T>().map_err(|cause| E::custom(format_args!("invalid value {text:?}: {cause}")))
+    text.parse::<T>()
+        .map_err(|cause| E::custom(format_args!("invalid value {text:?}: {cause}")))
 }
 
 impl<'de, T: Deserialize<'de> + FromStr> Visitor<'de> for Text<T>

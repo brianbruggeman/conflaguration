@@ -82,9 +82,7 @@ impl<'de> Deserializer<'de> for Lenient {
             Value::Option(Some(inner)) => visitor.visit_some(Lenient(*inner)),
             Value::Newtype(inner) => visitor.visit_newtype_struct(Lenient(*inner)),
             Value::Seq(items) => visitor.visit_seq(SeqDeserializer::<_, DeserializerError>::new(items.into_iter().map(Lenient))),
-            Value::Map(entries) => visitor.visit_map(MapDeserializer::<_, DeserializerError>::new(
-                entries.into_iter().map(|(key, item)| (Lenient(key), Lenient(item))),
-            )),
+            Value::Map(entries) => visitor.visit_map(MapDeserializer::<_, DeserializerError>::new(entries.into_iter().map(|(key, item)| (Lenient(key), Lenient(item))))),
             Value::Bytes(bytes) => visitor.visit_byte_buf(bytes),
         }
     }
@@ -248,9 +246,7 @@ impl<'de> VariantAccess<'de> for LenientVariant {
 
     fn struct_variant<V: Visitor<'de>>(self, _fields: &'static [&'static str], visitor: V) -> Result<V::Value, Self::Error> {
         match self.payload {
-            Some(Value::Map(entries)) => visitor.visit_map(MapDeserializer::<_, DeserializerError>::new(
-                entries.into_iter().map(|(key, item)| (Lenient(key), Lenient(item))),
-            )),
+            Some(Value::Map(entries)) => visitor.visit_map(MapDeserializer::<_, DeserializerError>::new(entries.into_iter().map(|(key, item)| (Lenient(key), Lenient(item))))),
             Some(other) => Err(de::Error::invalid_type(kind_of(&other), &"struct variant")),
             None => Err(de::Error::invalid_type(de::Unexpected::UnitVariant, &"struct variant")),
         }
