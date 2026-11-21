@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "conflaguration"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "config",
  "conflaguration-core",

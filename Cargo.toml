@@ -4,7 +4,7 @@ members = [".", "crates/*", "examples/*"]
 
 [package]
 name = "conflaguration"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2024"
 description = "typed settings structs from environment variables"
 license = "MIT"
