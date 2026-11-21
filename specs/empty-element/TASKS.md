@@ -22,7 +22,8 @@ pushing main) is the owner's go and is NOT a slice.
 ~~Last landed slice: 2b on `card/conflag-8` (not on main)~~ ~~Next action: measure AC6, AC11(f), AC12 and the slice-0 baseline; then slice 3 (version 2.2.0)~~
 Last landed slice: 3 on `card/conflag-8` (`39a69ff`, not on main). Measured 2026-11-21 (logs in `<tickets>/CONFLAG-8/evidence/`): slice-0 baseline 358 / 0 / 2 at `5bb4b91`; AC6 (a) 15 failed 11 passed, (b) 11 passed; full suite at `0366c5a` 395 / 0 / 2, clippy 0; AC11(f) `exit=0`, `0`, `1`; AC12 `0`; AC7 (b)-(f) `0`, `0`, `0`, `0`, two numstat lines; AC8 (a) `1`, (b) `1`, (c) `0`
 ~~Next action: spec-auditor ADMIT, then commit this spec on `card/conflag-8`, land on `main`, push; publishing 2.2.0 to crates.io is the owner's go~~ done: landed on `main` = origin `210bdb1`
-Next action (CONFLAG-9, 2026-11-21): ~~slice 4~~ (struck, audit REFUSE) slice 5 on `card/conflag-9`, spec-auditor on the amendment, land and push; then PROXIMA-50 row 24 re-validates on it (its `validate_config.xml` writes the empty `Schema::String` content as `<value><pattern/></value>`, the stated XML form); publishing 2.2.0 stays the owner's go
+~~Next action (CONFLAG-9, 2026-11-21): slice 5 on `card/conflag-9`, spec-auditor on the amendment, land and push~~ done: amendment CONFLAG-9 ADMIT at its round 5; slices 4 (struck) 5, 6 and the round-4 fixes landed on `main` = origin `1b8c1cc` (2026-11-21); PROXIMA-50 row 24's preview on it is green (`<tickets>/PROXIMA-50/evidence/slice24c-*.log`)
+Next action: publishing 2.2.0 to crates.io from `1b8c1cc`, the owner's go; then tag `v2.2.0` and PROXIMA-50 row 24 adopts it
 Open question, if any: none (core counts 9; the probe's 8 was a misread, `suite-base-core.log`)
 
 ## struck
