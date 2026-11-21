@@ -622,3 +622,239 @@ fn format_empty_layer_xml_keeps_base() {
 fn format_empty_layer_json_null_keeps_base() {
     check_keeps_base("empty_inner_null.json");
 }
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct PlainDef {
+    capture: Def,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct PlainReq {
+    capture: Req,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct S1 {
+    capture: String,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct S2 {
+    capture: Vec<String>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct S3 {
+    capture: Vec<Def>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize, serde::Serialize)]
+struct NullFields {
+    s: String,
+    v: Vec<String>,
+    d: Def,
+}
+
+fn serde_read<T: serde::de::DeserializeOwned>(json: &serde_json::Value) -> Result<T, String> {
+    serde_json::from_value::<T>(json.clone()).map_err(|error| error.to_string())
+}
+
+fn tree_read<T: serde::de::DeserializeOwned>(json: &serde_json::Value) -> Result<T, String> {
+    let tree = serde_json::from_value::<Tree>(json.clone()).map_err(|error| error.to_string())?;
+    from_tree::<T>(tree).map_err(|error| error.to_string())
+}
+
+fn agree<T: PartialEq + Debug>(oracle: Result<T, String>, got: Result<T, String>) -> Result<(), String> {
+    match (oracle, got) {
+        (Ok(want), Ok(have)) if want == have => Ok(()),
+        (Ok(want), Ok(have)) => Err(format!("value differs: {have:?} != {want:?}")),
+        (Err(_), Err(_)) => Ok(()),
+        (oracle, got) => Err(format!("disagree: oracle {oracle:?}, got {got:?}")),
+    }
+}
+
+fn same_as_serde<T: serde::de::DeserializeOwned + PartialEq + Debug>(json: &serde_json::Value) -> Result<(), String> {
+    agree(serde_read::<T>(json), tree_read::<T>(json))
+}
+
+fn empty_capture() -> serde_json::Value {
+    serde_json::json!({"capture": {}})
+}
+
+fn check_err_has<T: Debug>(result: Result<T, String>, needle: &str) -> Result<(), String> {
+    match result {
+        Err(text) if text.contains(needle) => Ok(()),
+        Err(text) => Err(format!("error lacks {needle:?}: {text}")),
+        Ok(value) => Err(format!("expected an error containing {needle:?}, got {value:?}")),
+    }
+}
+
+#[test]
+fn format_empty_json_option_default() {
+    same_as_serde::<OptDef>(&empty_capture()).expect("an empty map should read as serde_json reads it");
+    let expected = OptDef { capture: Some(Def::default()) };
+    check_read(tree_read::<OptDef>(&empty_capture()), &expected).expect("an empty map should be some default");
+}
+
+#[test]
+fn format_empty_json_option_required() {
+    same_as_serde::<OptReq>(&empty_capture()).expect("both reads should fail");
+    check_err_has(serde_read::<OptReq>(&empty_capture()), "missing field `data_path`").expect("serde_json names the field");
+    check_err_has(tree_read::<OptReq>(&empty_capture()), "data_path").expect("the tree read names the field");
+}
+
+#[test]
+fn format_empty_json_option_value() {
+    same_as_serde::<OptVal>(&empty_capture()).expect("an empty map should read as serde_json reads it");
+    let expected = OptVal { capture: Some(serde_json::json!({})) };
+    check_read(tree_read::<OptVal>(&empty_capture()), &expected).expect("an empty map should be some empty object");
+}
+
+#[test]
+fn format_empty_json_plain_default() {
+    same_as_serde::<PlainDef>(&empty_capture()).expect("an empty map should read as serde_json reads it");
+    let expected = PlainDef { capture: Def::default() };
+    check_read(tree_read::<PlainDef>(&empty_capture()), &expected).expect("an empty map should be the default struct");
+}
+
+#[test]
+fn format_empty_json_plain_required() {
+    same_as_serde::<PlainReq>(&empty_capture()).expect("both reads should fail");
+    check_err_has(serde_read::<PlainReq>(&empty_capture()), "data_path").expect("serde_json names the field");
+    check_err_has(tree_read::<PlainReq>(&empty_capture()), "data_path").expect("the tree read names the field");
+}
+
+#[test]
+fn format_empty_json_string() {
+    same_as_serde::<S1>(&empty_capture()).expect("both reads should fail");
+    check_err_has(serde_read::<S1>(&empty_capture()), "invalid type: map").expect("serde_json rejects a map for a string");
+    assert!(tree_read::<S1>(&empty_capture()).is_err(), "the tree read should reject a map for a string");
+}
+
+#[test]
+fn format_empty_json_vec_string() {
+    same_as_serde::<S2>(&empty_capture()).expect("both reads should fail");
+    check_err_has(serde_read::<S2>(&empty_capture()), "invalid type: map").expect("serde_json rejects a map for a list");
+    assert!(tree_read::<S2>(&empty_capture()).is_err(), "the tree read should reject a map for a list of strings");
+}
+
+#[test]
+fn format_empty_json_vec_struct() {
+    let expected = S3 { capture: vec![Def::default()] };
+    check_read(tree_read::<S3>(&empty_capture()), &expected).expect("a lone map should be a one-element list");
+}
+
+#[test]
+fn format_empty_null_non_option() {
+    let json = serde_json::json!({"s": null, "v": null, "d": null});
+    let expected = NullFields { s: String::new(), v: vec![], d: Def::default() };
+    check_read(tree_read::<NullFields>(&json), &expected).expect("null should read as empty for each plain type");
+    check_err_has(serde_read::<NullFields>(&json), "invalid type: null").expect("serde_json rejects the nulls");
+}
+
+#[test]
+fn format_empty_layer_toml_default() {
+    let base = OptDef { capture: None };
+    let result = ConfigBuilder::<OptDef>::new().value(base).file(named_path("empty_capture.toml")).build();
+    check_fixture(result, &OptDef { capture: Some(Def::default()) }).expect("an empty table layer should be some default");
+}
+
+#[test]
+fn format_empty_layer_toml_required() {
+    let base = OptReq { capture: None };
+    let result = ConfigBuilder::<OptReq>::new().value(base).file(named_path("empty_capture.toml")).build();
+    check_error(result, "data_path").expect("an empty table layer should miss the required field");
+}
+
+fn check_nonxml_empty(result: conflaguration::Result<Tree>) -> Result<(), String> {
+    check_json(tree_json(result), &serde_json::json!({"capture": {}}))
+}
+
+#[test]
+fn format_empty_nonxml_toml() {
+    check_nonxml_empty(from_toml_str::<Tree>("capture = {}")).expect("a toml empty table should stay a map");
+}
+
+#[test]
+fn format_empty_nonxml_yaml() {
+    check_nonxml_empty(from_yaml_str::<Tree>("capture: {}")).expect("a yaml empty map should stay a map");
+}
+
+#[test]
+fn format_empty_nonxml_json5() {
+    check_nonxml_empty(from_json5_str::<Tree>("{capture: {}}")).expect("a json5 empty object should stay a map");
+}
+
+#[test]
+fn format_empty_nonxml_ron() {
+    check_nonxml_empty(from_ron_str::<Tree>("(capture: {})")).expect("a ron empty map should stay a map");
+}
+
+#[test]
+fn ctl_empty_serde_json_option_default() {
+    let expected = OptDef { capture: Some(Def::default()) };
+    check_read(serde_read::<OptDef>(&empty_capture()), &expected).expect("serde_json reads an empty map as some default");
+}
+
+#[test]
+fn ctl_empty_serde_json_option_required() {
+    check_err_has(serde_read::<OptReq>(&empty_capture()), "missing field `data_path`").expect("serde_json names the missing field");
+}
+
+#[test]
+fn ctl_empty_serde_json_option_value() {
+    let expected = OptVal { capture: Some(serde_json::json!({})) };
+    check_read(serde_read::<OptVal>(&empty_capture()), &expected).expect("serde_json reads an empty map as some empty object");
+}
+
+#[test]
+fn ctl_empty_serde_json_plain_default() {
+    let expected = PlainDef { capture: Def::default() };
+    check_read(serde_read::<PlainDef>(&empty_capture()), &expected).expect("serde_json reads an empty map as the default struct");
+}
+
+#[test]
+fn ctl_empty_serde_json_plain_required() {
+    check_err_has(serde_read::<PlainReq>(&empty_capture()), "data_path").expect("serde_json names the missing field");
+}
+
+#[test]
+fn ctl_empty_serde_json_string() {
+    check_err_has(serde_read::<S1>(&empty_capture()), "invalid type: map").expect("serde_json rejects a map for a string");
+}
+
+#[test]
+fn ctl_empty_serde_json_vec_string() {
+    check_err_has(serde_read::<S2>(&empty_capture()), "invalid type: map").expect("serde_json rejects a map for a list of strings");
+}
+
+#[test]
+fn ctl_empty_serde_json_vec_struct() {
+    check_err_has(serde_read::<S3>(&empty_capture()), "invalid type: map").expect("serde_json rejects a map for a list of structs");
+}
+
+#[test]
+fn ctl_empty_serde_json_null_fields() {
+    let json = serde_json::json!({"s": null, "v": null, "d": null});
+    check_err_has(serde_read::<NullFields>(&json), "invalid type: null").expect("serde_json rejects nulls for plain types");
+}
+
+#[test]
+fn ctl_empty_tree_json_null() {
+    let tree = serde_json::from_value::<Tree>(serde_json::json!({"capture": null})).expect("a null literal should build a tree");
+    check_json(serde_json::Value::from(tree), &serde_json::json!({"capture": null})).expect("a hand-built unit tree should convert to null");
+}
+
+#[test]
+fn ctl_empty_literal_rejects() {
+    let verdict = agree(Ok(Some(Def::default())), Ok(None::<Def>));
+    assert!(verdict.is_err(), "agree should reject a some against a none");
+}
+
+fn check_read<T: PartialEq + Debug>(actual: Result<T, String>, expected: &T) -> Result<(), String> {
+    match actual {
+        Ok(value) if &value == expected => Ok(()),
+        Ok(value) => Err(format!("value differs: {value:?} != {expected:?}")),
+        Err(error) => Err(format!("read failed: {error}")),
+    }
+}

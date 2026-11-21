@@ -31,10 +31,6 @@ fn kind_of(value: &Value) -> de::Unexpected<'static> {
     }
 }
 
-fn is_empty_map(value: &Value) -> bool {
-    matches!(value, Value::Map(entries) if entries.is_empty())
-}
-
 macro_rules! parse_scalar {
     ($method:ident, $visit:ident, $target:ty) => {
         fn $method<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
@@ -116,7 +112,7 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_string<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if is_empty_map(&self.0) || matches!(self.0, Value::Unit) {
+        if matches!(self.0, Value::Unit) {
             return visitor.visit_string(String::new());
         }
         self.deserialize_any(visitor)
@@ -131,9 +127,6 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_option<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if is_empty_map(&self.0) {
-            return visitor.visit_none();
-        }
         match self.0 {
             Value::Option(_) => self.deserialize_any(visitor),
             Value::Unit => visitor.visit_unit(),
@@ -157,7 +150,7 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        if is_empty_map(&self.0) || matches!(self.0, Value::Unit) {
+        if matches!(self.0, Value::Unit) {
             return visitor.visit_seq(SeqDeserializer::<_, DeserializerError>::new(iter::empty::<Lenient>()));
         }
         match self.0 {
