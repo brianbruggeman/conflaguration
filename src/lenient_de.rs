@@ -77,7 +77,7 @@ impl<'de> Deserializer<'de> for Lenient {
             Value::F64(number) => visitor.visit_f64(number),
             Value::Char(letter) => visitor.visit_char(letter),
             Value::String(text) => visitor.visit_string(text),
-            Value::Unit => visitor.visit_unit(),
+            Value::Unit => visitor.visit_map(MapDeserializer::<_, DeserializerError>::new(iter::empty::<(Lenient, Lenient)>())),
             Value::Option(None) => visitor.visit_none(),
             Value::Option(Some(inner)) => visitor.visit_some(Lenient(*inner)),
             Value::Newtype(inner) => visitor.visit_newtype_struct(Lenient(*inner)),
@@ -133,11 +133,14 @@ impl<'de> Deserializer<'de> for Lenient {
     }
 
     fn deserialize_unit<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
-        self.deserialize_any(visitor)
+        match self.0 {
+            Value::Unit => visitor.visit_unit(),
+            other => Lenient(other).deserialize_any(visitor),
+        }
     }
 
     fn deserialize_unit_struct<V: Visitor<'de>>(self, _name: &'static str, visitor: V) -> Result<V::Value, Self::Error> {
-        self.deserialize_any(visitor)
+        self.deserialize_unit(visitor)
     }
 
     fn deserialize_newtype_struct<V: Visitor<'de>>(self, _name: &'static str, visitor: V) -> Result<V::Value, Self::Error> {

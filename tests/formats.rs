@@ -936,3 +936,209 @@ fn check_read<T: PartialEq + Debug>(actual: Result<T, String>, expected: &T) -> 
         Err(error) => Err(format!("read failed: {error}")),
     }
 }
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+enum Shape {
+    Text {
+        #[serde(default)]
+        pattern: Option<String>,
+    },
+    Count {
+        #[serde(default)]
+        min: Option<i64>,
+    },
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(untagged)]
+enum ShapeRef {
+    Inline(Shape),
+    Named(String),
+}
+
+#[derive(Debug, Default, PartialEq, serde::Deserialize)]
+struct EmptyInner {
+    #[serde(default)]
+    a: Option<String>,
+    #[serde(default)]
+    n: u32,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(untagged)]
+enum InnerOrText {
+    Struct(EmptyInner),
+    Text(String),
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct OptInner {
+    #[serde(default)]
+    inner: Option<EmptyInner>,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+#[serde(untagged)]
+enum OptOrText {
+    Opt(OptInner),
+    Text(String),
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct ShapeCfg {
+    items: Shape,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct ShapeRefCfg {
+    items: ShapeRef,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct InnerCfg {
+    inner: InnerOrText,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct OptCfg {
+    opt: OptOrText,
+}
+
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct ValueCfg {
+    x: serde_json::Value,
+}
+
+fn read_xml_unit_path<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
+    let tree = xml_tree(text).map_err(|error| error.to_string())?;
+    from_tree::<T>(tree).map_err(|error| error.to_string())
+}
+
+fn read_xml_map_path<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
+    let tree = from_xml_str::<Tree>(text).map_err(|error| error.to_string())?;
+    from_tree::<T>(tree).map_err(|error| error.to_string())
+}
+
+macro_rules! empty_enum_case {
+    ($format_name:ident, $ctl_name:ident, $type:ty, $xml:expr, $expected:expr) => {
+        #[test]
+        fn $format_name() {
+            check_read(read_xml_unit_path::<$type>($xml), &$expected).expect("an empty element should read as an empty map through deserialize_any");
+        }
+
+        #[test]
+        fn $ctl_name() {
+            check_read(read_xml_map_path::<$type>($xml), &$expected).expect("2.1.0's empty map path is the oracle for the same literal");
+        }
+    };
+}
+
+empty_enum_case!(
+    format_empty_enum_adjacent_selfclosing,
+    ctl_empty_enum_adjacent_selfclosing,
+    ShapeCfg,
+    "<cfg><items><type>text</type><value/></items></cfg>",
+    ShapeCfg { items: Shape::Text { pattern: None } }
+);
+
+empty_enum_case!(
+    format_empty_enum_adjacent_open_close,
+    ctl_empty_enum_adjacent_open_close,
+    ShapeCfg,
+    "<cfg><items><type>count</type><value></value></items></cfg>",
+    ShapeCfg { items: Shape::Count { min: None } }
+);
+
+empty_enum_case!(
+    format_empty_enum_adjacent_content_first,
+    ctl_empty_enum_adjacent_content_first,
+    ShapeCfg,
+    "<cfg><items><value/><type>text</type></items></cfg>",
+    ShapeCfg { items: Shape::Text { pattern: None } }
+);
+
+empty_enum_case!(
+    format_empty_enum_untagged_adjacent_selfclosing,
+    ctl_empty_enum_untagged_adjacent_selfclosing,
+    ShapeRefCfg,
+    "<cfg><items><type>text</type><value/></items></cfg>",
+    ShapeRefCfg {
+        items: ShapeRef::Inline(Shape::Text { pattern: None })
+    }
+);
+
+empty_enum_case!(
+    format_empty_enum_untagged_adjacent_open_close,
+    ctl_empty_enum_untagged_adjacent_open_close,
+    ShapeRefCfg,
+    "<cfg><items><type>text</type><value></value></items></cfg>",
+    ShapeRefCfg {
+        items: ShapeRef::Inline(Shape::Text { pattern: None })
+    }
+);
+
+empty_enum_case!(
+    format_empty_enum_untagged_struct,
+    ctl_empty_enum_untagged_struct,
+    InnerCfg,
+    "<cfg><inner/></cfg>",
+    InnerCfg {
+        inner: InnerOrText::Struct(EmptyInner::default())
+    }
+);
+
+empty_enum_case!(
+    format_empty_enum_untagged_option,
+    ctl_empty_enum_untagged_option,
+    OptCfg,
+    "<cfg><opt><inner/></opt></cfg>",
+    OptCfg {
+        opt: OptOrText::Opt(OptInner { inner: Some(EmptyInner::default()) })
+    }
+);
+
+empty_enum_case!(
+    format_empty_enum_value_target,
+    ctl_empty_enum_value_target,
+    ValueCfg,
+    "<cfg><x/></cfg>",
+    ValueCfg { x: serde_json::json!({}) }
+);
+
+fn read_json_through_tree<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
+    let tree = from_json_str::<Tree>(text).map_err(|error| error.to_string())?;
+    from_tree::<T>(tree).map_err(|error| error.to_string())
+}
+
+fn read_json_with_serde<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
+    serde_json::from_str::<T>(text).map_err(|error| error.to_string())
+}
+
+#[test]
+fn format_empty_enum_json_null_value_target() {
+    let expected = ValueCfg { x: serde_json::json!({}) };
+    check_read(read_json_through_tree::<ValueCfg>(r#"{"x": null}"#), &expected).expect("a json null reads as an empty element through the tree, R3's stated cost");
+}
+
+#[test]
+fn ctl_empty_enum_json_null_value_target() {
+    let expected = ValueCfg { x: serde_json::Value::Null };
+    check_read(read_json_with_serde::<ValueCfg>(r#"{"x": null}"#), &expected).expect("serde_json reads a json null into a Value as Null");
+}
+
+#[test]
+fn format_empty_enum_json_null_untagged_option() {
+    let expected = OptCfg {
+        opt: OptOrText::Opt(OptInner { inner: Some(EmptyInner::default()) }),
+    };
+    check_read(read_json_through_tree::<OptCfg>(r#"{"opt": {"inner": null}}"#), &expected).expect("a json null buffers as an empty element, so the untagged option reads Some, R3's stated cost");
+}
+
+#[test]
+fn ctl_empty_enum_json_null_untagged_option() {
+    let expected = OptCfg {
+        opt: OptOrText::Opt(OptInner { inner: None }),
+    };
+    check_read(read_json_with_serde::<OptCfg>(r#"{"opt": {"inner": null}}"#), &expected).expect("serde_json reads a json null into an untagged option as None");
+}
