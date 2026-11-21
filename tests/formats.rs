@@ -1031,6 +1031,11 @@ struct TreeCfg {
     x: Tree,
 }
 
+#[derive(Debug, PartialEq, serde::Deserialize)]
+struct SerdeValueCfg {
+    x: serde_value::Value,
+}
+
 fn read_xml_through_tree<T: serde::de::DeserializeOwned>(text: &str) -> Result<T, String> {
     let tree = conflaguration::tree_from_xml_str(text).map_err(|error| error.to_string())?;
     from_tree::<T>(tree).map_err(|error| error.to_string())
@@ -1066,12 +1071,6 @@ fn shape_text() -> ShapeCfg {
 fn shape_ref_text() -> ShapeRefCfg {
     ShapeRefCfg {
         items: ShapeRef::Inline(Shape::Text { pattern: None }),
-    }
-}
-
-fn tree_of_null() -> TreeCfg {
-    TreeCfg {
-        x: serde_json::from_str::<Tree>("null").expect("serde_json should read null into a Tree"),
     }
 }
 
@@ -1185,12 +1184,14 @@ fn ctl_enum_empty_buffered_option_null() {
 
 #[test]
 fn format_enum_empty_tree_null() {
-    check_read(read_json_through_tree::<TreeCfg>(r#"{"x":null}"#), &tree_of_null()).expect("a null read as a Tree stays the unit Tree");
+    let cfg = read_json_through_tree::<TreeCfg>(r#"{"x":null}"#).expect("a json null should read into a Tree");
+    check_json(serde_json::Value::from(cfg.x), &serde_json::Value::Null).expect("a null read as a Tree stays null");
 }
 
 #[test]
 fn ctl_enum_empty_tree_null() {
-    check_read(read_json_with_serde::<TreeCfg>(r#"{"x":null}"#), &tree_of_null()).expect("serde_json reads null into the unit Tree");
+    let expected = SerdeValueCfg { x: serde_value::Value::Unit };
+    check_read(read_json_with_serde::<SerdeValueCfg>(r#"{"x":null}"#), &expected).expect("serde_json reads null into a serde_value::Value as Unit");
 }
 
 #[test]
@@ -1203,4 +1204,16 @@ fn format_enum_empty_xml_empty_as_value() {
 fn ctl_enum_empty_xml_empty_as_value() {
     let expected = ValueCfg { x: serde_json::Value::Null };
     check_read(read_json_with_serde::<ValueCfg>(r#"{"x":null}"#), &expected).expect("serde_json reads null into a Value as Null");
+}
+
+#[test]
+fn format_enum_empty_external_unit_empty() {
+    let expected = ExtCfg { items: ExtShape::Off };
+    check_read(read_xml_through_tree::<ExtCfg>("<cfg><items><off/></items></cfg>"), &expected).expect("an empty element reads an externally tagged unit variant");
+}
+
+#[test]
+fn ctl_enum_empty_external_unit_empty() {
+    let expected = ExtCfg { items: ExtShape::Off };
+    check_read(read_json_with_serde::<ExtCfg>(r#"{"items":{"off":null}}"#), &expected).expect("serde_json reads a null payload as an externally tagged unit variant");
 }
